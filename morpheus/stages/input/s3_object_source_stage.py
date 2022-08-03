@@ -17,7 +17,6 @@ import logging
 
 import srf
 
-from morpheus._lib.file_types import FileTypes
 from morpheus.config import Config
 from morpheus.messages import MessageMeta
 from morpheus.pipeline.single_output_source import SingleOutputSource
@@ -28,45 +27,30 @@ logger = logging.getLogger(__name__)
 
 class S3BucketSourceStage(SingleOutputSource):
     """
-    Source stage is used to load messages from a file and dumping the contents into the pipeline immediately. Useful for
-    testing performance and accuracy of a pipeline.
+    Source stage is used to load objects from an s3 resource and pushing them to the pipeline.
 
     Parameters
     ----------
     c : `morpheus.config.Config`
         Pipeline configuration instance.
-    bucket : str
-        Name of the s3 bucket to pull data from.
-    file_type : `morpheus._lib.file_types.FileTypes`, default = 'auto'
-        Indicates what type of file to read. Specifying 'auto' will determine the file type from the extension.
-        Supported extensions: 'json', 'csv'
-    cudf_kwargs: dict, default=None
-        keyword args passed to underlying cuDF I/O function. See the cuDF documentation for `cudf.read_csv()` and
-        `cudf.read_json()` for the available options. With `file_type` == 'json', this defaults to ``{ "lines": True }``
-        and with `file_type` == 'csv', this defaults to ``{}``.
+    object_generator: generator function which will produce s3 objects until exhausted
     """
 
     def __init__(self,
                  c: Config,
-                 aws_access_key_id: str,
-                 aws_secret_access_key: str,
-                 aws_session_token: str,
-                 object_aggregator=None,  # Given an s3 resource, aggregates and returns a list of objects
+                 object_generator=None,
                  ):
 
         super().__init__(c)
 
-        if (object_aggregator is None):
+        if (object_generator is None):
             raise RuntimeError("Object aggregator function cannot be None")
 
-        self._aws_access_key_id = aws_access_key_id
-        self._aws_secret_access_key = aws_secret_access_key
-        self._aws_session_token = aws_session_token
-        self._object_aggregator = object_aggregator
+        self._object_generator = object_generator
 
     @property
     def name(self) -> str:
-        return "from-s3-bucket"
+        return "object-from-s3"
 
     @property
     def input_count(self) -> int:
@@ -78,23 +62,8 @@ class S3BucketSourceStage(SingleOutputSource):
 
     def _build_source(self, builder: srf.Builder) -> StreamPair:
 
-        out_stream = builder.make_source(self.unique_name, self._generate_frames())
+        out_stream = builder.make_source(self.unique_name, self._object_generator())
 
-        out_type = MessageMeta
+        out_type = type(boto3.Session().resource('s3').Object("_", "_"))
 
         return out_stream, out_type
-
-    def _get_s3_objects(self):
-        session = boto3.Session(aws_access_key_id=self._aws_access_key_id,
-                                aws_secret_access_key=self._aws_secret_access_key,
-                                aws_session_token=self._aws_session_token)
-
-        s3 = session.resource('s3')
-
-        return self._object_aggregator(s3)
-
-    def _generate_objects(self):
-        objects = self._get_s3_objects()
-
-        for object in objects:
-            yield object

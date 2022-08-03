@@ -15,14 +15,11 @@
 import boto3
 from datetime import datetime, timedelta
 import json
-import os
 import typing
 
 import srf
-import srf.core.operators as ops
 
 from morpheus.config import Config
-from morpheus.messages import MessageMeta
 from morpheus.pipeline.single_port_stage import SinglePortStage
 from morpheus.pipeline.stream_pair import StreamPair
 
@@ -42,10 +39,10 @@ class WriteToS3Stage(SinglePortStage):
 
     """
 
-    def __init__(self, c: Config, bucket: str):
+    def __init__(self, c: Config, s3_writer):
         super().__init__(c)
 
-        self._bucket = bucket
+        self._s3_writer = s3_writer
 
     @property
     def name(self) -> str:
@@ -61,7 +58,7 @@ class WriteToS3Stage(SinglePortStage):
             Accepted input types.
 
         """
-        return (MessageMeta,)
+        return (typing.Any,)
 
     def supports_cpp_node(self):
         return False
@@ -77,7 +74,7 @@ class WriteToS3Stage(SinglePortStage):
         # Return input unchanged to allow passthrough
         return stream, input_stream[1]
 
-    def _write_results_s3(self, message: MessageMeta):
+    def _write_results_s3(self, message):
         """
         Write results to s3 bucket
         :param result_json:

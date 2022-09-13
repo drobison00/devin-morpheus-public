@@ -55,6 +55,7 @@ class Pipeline():
 
         self._id_counter = 0
 
+        self._segment_stages: typing.List[typing.Set[Stage]] = []
         self._sources: typing.Set[SourceStage] = set()
         self._stages: typing.Set[Stage] = set()
 
@@ -68,6 +69,7 @@ class Pipeline():
         self.batch_size = c.pipeline_batch_size
 
         self._graph = networkx.DiGraph()
+        self._segment_graph = networkx.DiGraph()
 
         self._is_built = False
         self._is_build_complete = False
@@ -146,26 +148,32 @@ class Pipeline():
 
         self._srf_pipeline = srf.Pipeline()
 
+        for segment_stages in self._segment_stages:
+            # segment_stages is a set of stages
+
         def inner_build(builder: srf.Builder):
             logger.info("====Building Pipeline====")
 
             # Get the list of stages and source
             source_and_stages: typing.List[StreamWrapper] = list(self._sources) + list(self._stages)
 
+            for stage in networkx.topological_sort(self._graph):
+                stage.build(builder, do_propagate=False)
+
             # Now loop over stages
-            for s in source_and_stages:
+            #for s in source_and_stages:
+            #
+            #    if (s.can_build()):
+            #        s.build(builder)
 
-                if (s.can_build()):
-                    s.build(builder)
+            #if (not all([x.is_built for x in source_and_stages])):
+            #    # raise NotImplementedError("Circular pipelines are not yet supported!")
+            #    logger.warning("Circular pipeline detected! Building with reduced constraints")
 
-            if (not all([x.is_built for x in source_and_stages])):
-                # raise NotImplementedError("Circular pipelines are not yet supported!")
-                logger.warning("Circular pipeline detected! Building with reduced constraints")
+            #    for s in source_and_stages:
 
-                for s in source_and_stages:
-
-                    if (s.can_build(check_ports=True)):
-                        s.build()
+            #        if (s.can_build(check_ports=True)):
+            #            s.build()
 
             if (not all([x.is_built for x in source_and_stages])):
                 raise RuntimeError("Could not build pipeline. Ensure all types can be determined")

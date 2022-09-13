@@ -36,6 +36,7 @@ class LinearPipeline(_pipeline.Pipeline):
         super().__init__(c)
 
         self._linear_stages: typing.List[_pipeline.StreamWrapper] = []
+        self._segment_linear_stages: typing.List[typing.List[_pipeline.StreamWrapper]] = []
 
     def set_source(self, source: _pipeline.SourceStage):
         """
@@ -88,3 +89,15 @@ class LinearPipeline(_pipeline.Pipeline):
         self.add_edge(self._linear_stages[-1], stage)
 
         self._linear_stages.append(stage)
+
+    def add_segment_boundary(self, boundary_egress: str, boundary_ingress: str):
+        assert (boundary_egress == boundary_ingress)  # For testing, have to be the same name for now
+
+        if (len(self._linear_stages) == 0):
+            raise RuntimeError("Cannot create a segment boundary, current segment is empty.")
+
+        # TODO Create boundary splice, stick it into self._linear_stages
+
+        self._segment_linear_stages.append(self._linear_stages)
+        self._linear_stages = []
+

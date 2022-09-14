@@ -19,13 +19,13 @@ import srf
 
 from morpheus.config import Config
 from morpheus.pipeline.single_port_stage import SinglePortStage
+from morpheus.pipeline.single_output_source import SingleOutputSource
 from morpheus.pipeline.stream_pair import StreamPair
-from morpheus.utils.logger import deprecated_stage_warning
 
 logger = logging.getLogger(__name__)
 
 
-class LinearBoundaryStage(SinglePortStage):
+class LinearBoundaryEgressStage(SinglePortStage):
     """
     Parameters
     ----------
@@ -34,15 +34,14 @@ class LinearBoundaryStage(SinglePortStage):
 
     """
 
-    def __init__(self, c: Config, egress_id: str, ingress_id: str):
+    def __init__(self, c: Config, boundary_port_id: str):
         super().__init__(c)
 
-        self._egress_id = egress_id
-        self._ingress_id = ingress_id
+        self._port_id = boundary_port_id
 
     @property
     def name(self) -> str:
-        return "segment_boundary"
+        return "linear_segment_boundary"
 
     def accepted_types(self) -> typing.Tuple:
         """
@@ -54,15 +53,55 @@ class LinearBoundaryStage(SinglePortStage):
             Accepted input types.
 
         """
-        return (typing.Any, )
+        return (typing.Any,)
 
     def supports_cpp_node(self):
         return False
 
     def _build_single(self, builder: srf.Builder, input_stream: StreamPair) -> StreamPair:
-        input_type = input_stream[0]
-        output_type = input_stream[0]
+        boundary_egress = builder.get_egress(self._port_id)
+        builder.make_edge(input_stream[0], boundary_egress)
 
-        deprecated_stage_warning(logger, type(self), self.unique_name)
+        return boundary_egress, input_stream[1]
 
-        return input_stream
+
+class LinearBoundaryIngressStage(SingleOutputSource):
+    """
+    Parameters
+    ----------
+    c : `morpheus.config.Config`
+        Pipeline configuration instance.
+
+    """
+
+    def __init__(self, c: Config, boundary_port_id: str):
+        super().__init__(c)
+
+        self._port_id = boundary_port_id
+
+    @property
+    def name(self) -> str:
+        return "segment_boundary_ingress"
+
+    def accepted_types(self) -> typing.Tuple:
+        """
+        Accepted input types for this stage are returned.
+
+        Returns
+        -------
+        typing.Tuple
+            Accepted input types.
+
+        """
+        return (typing.Any,)
+
+    def supports_cpp_node(self):
+        return False
+
+    def _build_source(self, builder: srf.Builder) -> StreamPair:
+        boundary_ingress = builder.get_ingress(self._port_id)
+        source = builder.make_node(self.unique_name, lambda data: data)
+
+        builder.make_edge(boundary_ingress, source)
+
+        return source, typing.Any

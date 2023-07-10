@@ -56,7 +56,7 @@ def test_single_object_to_dataframe(single_file_obj: fsspec.core.OpenFile):
         json_data = json.load(fh)
         expected_data = json_data['data']
 
-    aslist = [x.tolist() for x in df['data'].to_list()]  #  to_list returns a list of numpy arrays
+    aslist = [x.tolist() for x in df['data'].to_list()]  # to_list returns a list of numpy arrays
 
     assert (aslist == expected_data)
 

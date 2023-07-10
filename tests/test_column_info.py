@@ -33,6 +33,7 @@ from morpheus.utils.column_info import DateTimeColumn
 from morpheus.utils.column_info import RenameColumn
 from morpheus.utils.column_info import StringCatColumn
 from morpheus.utils.column_info import StringJoinColumn
+from morpheus.utils.nvt import dataframe_input_schema_to_nvt_workflow
 from morpheus.utils.schema_transforms import process_dataframe
 from utils import TEST_DIRS
 
@@ -99,10 +100,9 @@ def test_dataframe_input_schema_with_json_cols():
     assert "properties.userPrincipalName" not in processed_df_cols
 
     # Test that we get the same answer when the dataframe is processed via workflow
-    # TODO: Uncomment once https://github.com/rapidsai/cudf/issues/13305 is fixed
-    # nvt_workflow = dataframe_input_schema_to_nvt_workflow(schema)
-    # df_processed_workflow = process_dataframe(input_df, nvt_workflow)
-    # assert df_processed_schema.equals(df_processed_workflow)
+    nvt_workflow = dataframe_input_schema_to_nvt_workflow(schema)
+    df_processed_workflow = process_dataframe(input_df, nvt_workflow)
+    assert df_processed_schema.equals(df_processed_workflow)
 
 
 @pytest.mark.use_python

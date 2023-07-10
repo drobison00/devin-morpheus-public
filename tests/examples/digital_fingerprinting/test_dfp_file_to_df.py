@@ -22,8 +22,6 @@ import fsspec
 import pandas as pd
 import pytest
 
-import cudf
-
 from morpheus.common import FileTypes
 from morpheus.config import Config
 from morpheus.pipeline.preallocator_mixin import PreallocatorMixin
@@ -34,8 +32,8 @@ from utils import TEST_DIRS
 from utils.dataset_manager import DatasetManager
 
 
-@pytest.fixture
-def single_file_obj():
+@pytest.fixture(name='single_file_obj')
+def single_file_obj_fixture():
     input_file = os.path.join(TEST_DIRS.tests_data_dir,
                               'appshield',
                               'snapshot-1',
@@ -55,8 +53,8 @@ def test_single_object_to_dataframe(single_file_obj: fsspec.core.OpenFile):
 
     assert df.columns == ['data']
     with open(single_file_obj.path, encoding='UTF-8') as fh:
-        d = json.load(fh)
-        expected_data = d['data']
+        json_data = json.load(fh)
+        expected_data = json_data['data']
 
     aslist = [x.tolist() for x in df['data'].to_list()]  #  to_list returns a list of numpy arrays
 

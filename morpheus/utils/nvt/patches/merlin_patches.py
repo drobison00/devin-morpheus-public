@@ -24,7 +24,6 @@ def patch_numpy_dtype_registry():
 
     Until this is fixed upstream, with the mappings added to `merlin/dtypes/mappings/numpy.py`, this patch should be
     used. The function is idempotent, and should be called before any NVT operators are used.
-    :return:
     """
     from merlin.dtypes import _dtype_registry
 

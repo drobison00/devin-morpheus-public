@@ -30,7 +30,7 @@ from morpheus.utils.nvt.patches import patch_numpy_dtype_registry
 patch_numpy_dtype_registry()
 # ========================================================================
 
-logger = logging.getLogger("morpheus.{}".format(__name__))
+logger = logging.getLogger(f"morpheus.{__name__}")
 
 
 def _process_columns(df_in, input_schema: DataFrameInputSchema):
@@ -44,11 +44,11 @@ def _process_columns(df_in, input_schema: DataFrameInputSchema):
         convert_to_cudf = True
 
     # Iterate over the column info
-    for ci in input_schema.column_info:
+    for col_info in input_schema.column_info:
         try:
-            output_df[ci.name] = ci._process_column(df_in)
+            output_df[col_info.name] = col_info._process_column(df_in)
         except Exception:
-            logger.exception("Failed to process column '%s'. Dataframe: \n%s", ci.name, df_in, exc_info=True)
+            logger.exception("Failed to process column '%s'. Dataframe: \n%s", col_info.name, df_in, exc_info=True)
             raise
 
     if (input_schema.preserve_columns is not None):
@@ -139,5 +139,5 @@ def process_dataframe(
 
     if (convert_to_pd):
         return result.to_pandas()
-    else:
-        return result
+
+    return result

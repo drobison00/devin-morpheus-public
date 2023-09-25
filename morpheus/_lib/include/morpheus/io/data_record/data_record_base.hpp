@@ -30,7 +30,8 @@ class DataRecord
     virtual void create(const uint8_t* bytes, std::size_t size) = 0;
     // virtual std::optional<std::vector<uint8_t>> Read() = 0;
     // virtual std::optional<bool> Update(const std::vector<uint8_t>& new_data) = 0;
-    // virtual std::optional<bool> Delete() = 0;
+    virtual void remove() = 0;
+
     virtual std::string backing_store() const = 0;
 };
 }  // namespace morpheus::io

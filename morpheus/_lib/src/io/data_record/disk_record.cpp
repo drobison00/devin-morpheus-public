@@ -31,6 +31,9 @@ void DiskRecord::create(const uint8_t* bytes, std::size_t size)
     }
 }
 
+void DiskRecord::remove()
+{}
+
 std::string DiskRecord::backing_store() const
 {
     return "System Disk";

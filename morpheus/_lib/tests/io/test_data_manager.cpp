@@ -28,7 +28,7 @@ using namespace morpheus;
 using namespace morpheus::test;
 using namespace morpheus::io;
 
-class DataManagerParameterizedTypeTest : public ::testing::TestWithParam<data_record_type>
+class DataManagerParameterizedTypeTest : public ::testing::TestWithParam<DataRecordType>
 {};
 
 TEST_F(DataManagerTest, ConcurrentCreate)
@@ -40,7 +40,7 @@ TEST_F(DataManagerTest, ConcurrentCreate)
     auto create_record = [&]() {
         for (int i = 0; i < 100; ++i)
         {
-            ASSERT_NO_THROW({ std::string uuid = manager.create(data_record_type::memory, bytes, 3); });
+            ASSERT_NO_THROW({ std::string uuid = manager.create(DataRecordType::memory, bytes, 3); });
         }
     };
 
@@ -59,7 +59,7 @@ TEST_F(DataManagerTest, ConcurrentCreate)
 TEST_F(DataManagerTest, CreateRecordFailureWithMemoryType)
 {
     DataManager manager;
-    auto type = data_record_type::memory;
+    auto type = DataRecordType::memory;
 
     try
     {
@@ -75,7 +75,7 @@ TEST_F(DataManagerTest, CreateRecordFailureWithMemoryType)
 TEST_F(DataManagerTest, CreateRecordFailureWithDiskType)
 {
     DataManager manager;
-    auto type = data_record_type::disk;
+    auto type = DataRecordType::disk;
 
     try
     {
@@ -89,12 +89,13 @@ TEST_F(DataManagerTest, CreateRecordFailureWithDiskType)
 }
 
 // Test for create using a std::vector<uint8_t>
-TEST_F(DataManagerTest, CreateRecordFromVector) {
+TEST_F(DataManagerTest, CreateRecordFromVector)
+{
     DataManager manager;
     std::vector<uint8_t> data = {1, 2, 3, 4, 5};
 
     ASSERT_NO_THROW({
-        std::string uuid = manager.create(data_record_type::memory, data);
+        std::string uuid = manager.create(DataRecordType::memory, data);
         // Add code to validate UUID format if needed.
     }) << "Failed to create DataRecord from std::vector<uint8_t>";
 }
@@ -102,7 +103,7 @@ TEST_F(DataManagerTest, CreateRecordFromVector) {
 TEST_P(DataManagerParameterizedTypeTest, CreateRecord)
 {
     DataManager manager;
-    auto type                 = GetParam();
+    auto type        = GetParam();
     uint8_t bytes[5] = {1, 2, 3, 4, 5};
 
     ASSERT_NO_THROW({
@@ -114,36 +115,143 @@ TEST_P(DataManagerParameterizedTypeTest, CreateRecord)
 TEST_P(DataManagerParameterizedTypeTest, CreateRecordFailure)
 {
     DataManager manager;
-    auto type                 = static_cast<data_record_type>(-1);  // Invalid type
+    auto type        = static_cast<DataRecordType>(-1);  // Invalid type
     uint8_t bytes[5] = {1, 2, 3, 4, 5};
 
     ASSERT_THROW({ manager.create(type, bytes, 5); }, std::runtime_error)
         << "Should throw runtime_error for invalid data record type";
 }
 
-// Run the DataManagerTest for both memory and disk data_record_types
+// Run the DataManagerTest for both memory and disk DataRecordTypes
 INSTANTIATE_TEST_SUITE_P(DataRecordTypes,
                          DataManagerParameterizedTypeTest,
-                         ::testing::Values(morpheus::io::data_record_type::memory,
-                                           morpheus::io::data_record_type::disk));
+                         ::testing::Values(morpheus::io::DataRecordType::memory, morpheus::io::DataRecordType::disk));
 
-TEST(DataManagerTests, CreateAsync) {
+TEST_F(DataManagerTest, CreateAsyncVector)
+{
     DataManager manager;
     std::vector<uint8_t> data = {1, 2, 3, 4, 5};
 
     ASSERT_NO_THROW({
-        auto future = manager.create_async(data_record_type::memory, data);
+        auto future      = manager.create_async(DataRecordType::memory, data);
         std::string uuid = future.get();
         // Validate uuid format if needed.
     });
 }
 
-TEST(DataManagerTests, CreateAsyncInvalidType) {
+TEST_F(DataManagerTest, CreateAsyncBytes)
+{
+    DataManager manager;
+    uint8_t bytes[5] = {1, 2, 3, 4, 5};
+
+    ASSERT_NO_THROW({
+        auto future      = manager.create_async(DataRecordType::memory, bytes, 5);
+        std::string uuid = future.get();
+        // Validate uuid format if needed.
+    });
+}
+
+TEST_F(DataManagerTest, CreateAsyncInvalidType)
+{
     DataManager manager;
     std::vector<uint8_t> data = {1, 2, 3, 4, 5};
 
-    ASSERT_THROW({
-        auto future = manager.create_async(static_cast<data_record_type>(-1), data);
-        future.get();
-    }, std::runtime_error);
+    ASSERT_THROW(
+        {
+            auto future = manager.create_async(static_cast<DataRecordType>(-1), data);
+            future.get();
+        },
+        std::runtime_error);
+}
+
+TEST_F(DataManagerTest, RemoveMethod)
+{
+    morpheus::io::DataManager manager;
+
+    // Create a record first
+    std::vector<uint8_t> data = {1, 2, 3};
+    std::string uuid          = manager.create(morpheus::io::DataRecordType::memory, data);
+
+    // Test removal
+    bool result = manager.remove(uuid);
+    ASSERT_TRUE(result);
+
+    // Attempt to remove it again should return false
+    result = manager.remove(uuid);
+    ASSERT_FALSE(result);
+}
+
+TEST_F(DataManagerTest, RemoveMethodAsync)
+{
+    morpheus::io::DataManager manager;
+
+    // Create a record first
+    std::vector<uint8_t> data = {1, 2, 3};
+    std::string uuid          = manager.create(morpheus::io::DataRecordType::memory, data);
+
+    // Test async removal
+    auto future_result = manager.remove_async(uuid);
+    ASSERT_TRUE(future_result.get());
+
+    // Attempt to remove it again should return false
+    auto future_result_again = manager.remove_async(uuid);
+    ASSERT_FALSE(future_result_again.get());
+}
+
+TEST_F(DataManagerTest, GetManifest)
+{
+    morpheus::io::DataManager manager;
+
+    // Create some records
+    std::vector<uint8_t> data1 = {1, 2, 3};
+    std::string uuid1          = manager.create(morpheus::io::DataRecordType::memory, data1);
+
+    std::vector<uint8_t> data2 = {4, 5, 6};
+    std::string uuid2          = manager.create(morpheus::io::DataRecordType::memory, data2);
+
+    // Get the manifest
+    auto manifest = manager.get_manifest();
+
+    // Check if both UUIDs are in the manifest
+    ASSERT_TRUE(std::find(manifest.begin(), manifest.end(), uuid1) != manifest.end());
+    ASSERT_TRUE(std::find(manifest.begin(), manifest.end(), uuid2) != manifest.end());
+}
+
+TEST_F(DataManagerTest, GetManifestWithAsyncAndSync)
+{
+    morpheus::io::DataManager manager;
+
+    std::vector<std::string> uuids;
+    std::vector<std::future<std::string>> future_uuids;
+
+    std::vector<uint8_t> data = {1, 2, 3};
+
+    // Create 25 records synchronously
+    for (int i = 0; i < 25; ++i)
+    {
+        std::string uuid = manager.create(morpheus::io::DataRecordType::memory, data);
+        uuids.push_back(uuid);
+    }
+
+    // Create 25 records asynchronously
+    for (int i = 0; i < 25; ++i)
+    {
+        auto future_uuid = manager.create_async(morpheus::io::DataRecordType::memory, data);
+        future_uuids.push_back(std::move(future_uuid));
+    }
+
+    // Retrieve the UUIDs from the async operations
+    for (auto& future_uuid : future_uuids)
+    {
+        uuids.push_back(future_uuid.get());
+    }
+
+    // Get the manifest
+    auto manifest = manager.get_manifest();
+
+    // Verify that all UUIDs appear in the manifest
+    for (const auto& uuid : uuids)
+    {
+        ASSERT_TRUE(std::find(manifest.begin(), manifest.end(), uuid) != manifest.end());
+    }
 }

@@ -24,28 +24,29 @@
 #include <glog/logging.h>
 
 #include <memory>
+#include <mutex>
 
 namespace {
-std::string data_record_type_to_string(morpheus::io::data_record_type type)
+std::string data_record_type_to_string(morpheus::io::DataRecordType type)
 {
     switch (type)
     {
-    case morpheus::io::data_record_type::memory:
+    case morpheus::io::DataRecordType::memory:
         return "memory";
-    case morpheus::io::data_record_type::disk:
+    case morpheus::io::DataRecordType::disk:
         return "disk";
     default:
         return "unknown";
     }
 }
 
-std::unique_ptr<morpheus::io::DataRecord> create_data_record_by_type(morpheus::io::data_record_type type)
+std::unique_ptr<morpheus::io::DataRecord> create_data_record_by_type(morpheus::io::DataRecordType type)
 {
     switch (type)
     {
-    case morpheus::io::data_record_type::memory:
+    case morpheus::io::DataRecordType::memory:
         return std::make_unique<morpheus::io::MemoryRecord>();
-    case morpheus::io::data_record_type::disk:
+    case morpheus::io::DataRecordType::disk:
         return std::make_unique<morpheus::io::DiskRecord>();
     default:
         return nullptr;
@@ -55,7 +56,7 @@ std::unique_ptr<morpheus::io::DataRecord> create_data_record_by_type(morpheus::i
 
 namespace morpheus::io {
 
-std::string DataManager::create(morpheus::io::data_record_type type, const uint8_t* bytes, std::size_t size)
+std::string DataManager::create(morpheus::io::DataRecordType type, const uint8_t* bytes, std::size_t size)
 {
     try
     {
@@ -95,21 +96,54 @@ std::string DataManager::create(morpheus::io::data_record_type type, const uint8
     }
 }
 
-std::string DataManager::create(data_record_type type, const std::vector<uint8_t>& bytes)
+std::string DataManager::create(DataRecordType type, const std::vector<uint8_t>& bytes)
 {
     return create(type, bytes.data(), bytes.size());
 }
 
-std::future<std::string> DataManager::create_async(data_record_type type, const uint8_t* bytes, std::size_t size)
+std::future<std::string> DataManager::create_async(DataRecordType type, const uint8_t* bytes, std::size_t size)
 {
-    using pointer_type_t = std::string (DataManager::*)(data_record_type, const uint8_t*, std::size_t);
+    using pointer_type_t = std::string (DataManager::*)(DataRecordType, const uint8_t*, std::size_t);
     return std::async(std::launch::async, static_cast<pointer_type_t>(&DataManager::create), this, type, bytes, size);
 }
 
-std::future<std::string> DataManager::create_async(data_record_type type, const std::vector<uint8_t>& bytes)
+std::future<std::string> DataManager::create_async(DataRecordType type, const std::vector<uint8_t>& bytes)
 {
-    using pointer_type_t = std::string (DataManager::*)(data_record_type, const std::vector<uint8_t>&);
+    using pointer_type_t = std::string (DataManager::*)(DataRecordType, const std::vector<uint8_t>&);
     return std::async(std::launch::async, static_cast<pointer_type_t>(&DataManager::create), this, type, bytes);
+}
+
+std::vector<std::string> DataManager::get_manifest()
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    std::vector<std::string> manifest;
+
+    for (const auto& [uuid, _] : m_records)
+    {
+        manifest.push_back(uuid);
+    }
+
+    return manifest;
+}
+
+bool DataManager::remove(const std::string& uuid_str)
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+
+    auto it = m_records.find(uuid_str);
+    if (it != m_records.end())
+    {
+        it->second->remove();
+        m_records.erase(it);
+        return true;
+    }
+
+    return false;
+}
+
+std::future<bool> DataManager::remove_async(const std::string& uuid_str)
+{
+    return std::async(std::launch::async, &DataManager::remove, this, uuid_str);
 }
 
 }  // namespace morpheus::io

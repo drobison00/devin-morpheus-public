@@ -25,6 +25,7 @@ namespace morpheus::io {
 class DiskRecord : public DataRecord
 {
     void create(const uint8_t* bytes, std::size_t size) override;
+    void remove() override;
 
     std::string backing_store() const override;
 };

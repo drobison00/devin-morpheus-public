@@ -30,6 +30,9 @@ void MemoryRecord::create(const uint8_t* bytes, std::size_t size)
     }
 }
 
+void MemoryRecord::remove()
+{}
+
 std::string MemoryRecord::backing_store() const
 {
     return "System Memory";

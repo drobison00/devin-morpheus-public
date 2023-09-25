@@ -24,6 +24,8 @@
 namespace morpheus::io {
 class MemoryRecord : public DataRecord
 {
-    bool create(const std::vector<uint8_t>& data) override;
+    void create(const uint8_t* bytes, std::size_t size) override;
+
+    std::string backing_store() const override;
 };
 }  // namespace morpheus::io

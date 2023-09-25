@@ -20,8 +20,20 @@
 #include <glog/logging.h>
 
 namespace morpheus::io {
-bool DiskRecord::create(const std::vector<uint8_t>& data)
+void DiskRecord::create(const uint8_t* bytes, std::size_t size)
 {
-    return true;
+    if (bytes == nullptr)
+    {
+        std::string error_message = "Failed to create 'disk' record: invalid data pointer";
+        LOG(ERROR) << error_message;
+
+        throw std::runtime_error(error_message);
+    }
 }
+
+std::string DiskRecord::backing_store() const
+{
+    return "System Disk";
+}
+
 }  // namespace morpheus::io

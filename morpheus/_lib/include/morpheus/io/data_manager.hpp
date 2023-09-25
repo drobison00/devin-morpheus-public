@@ -18,21 +18,21 @@
 #pragma once
 
 #include "data_record/data_record_base.hpp"
-#include "data_record/disk_record.hpp"
-#include "data_record/memory_record.hpp"
 
 #include <boost/uuid/uuid.hpp>
 #include <boost/uuid/uuid_generators.hpp>
 #include <boost/uuid/uuid_io.hpp>
 
+#include <cstdint>
+#include <future>
 #include <iostream>
 #include <map>
 #include <memory>
-#include <random>
 #include <string>
 #include <vector>
 
 namespace morpheus::io {
+#pragma GCC visibility push(default)
 enum class data_record_type
 {
     memory,
@@ -48,12 +48,19 @@ std::string data_record_type_to_string(data_record_type type);
 class DataManager
 {
   public:
+    ~DataManager() = default;
     DataManager() = default;
 
-    std::optional<std::string> create(data_record_type type, const std::vector<uint8_t>& data);
+    std::string create(data_record_type type, const uint8_t* bytes, std::size_t size);
+    std::string create(data_record_type type, const std::vector<uint8_t>& bytes);
+
+    std::future<std::string> create_async(data_record_type type, const uint8_t* bytes, std::size_t size);
+    std::future<std::string> create_async(data_record_type type, const std::vector<uint8_t>& bytes);
+
 
   private:
-    std::unique_ptr<DataRecord> create_data_record_by_type(data_record_type type);
+    std::mutex m_mutex;
     std::map<std::string, std::unique_ptr<DataRecord>> m_records;
 };
+#pragma GCC visibility pop
 }  // namespace morpheus::io

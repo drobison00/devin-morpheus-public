@@ -109,6 +109,7 @@ add_morpheus_test(
     io/test_data_loader.cpp
     io/test_data_loader_registry.cpp
     io/test_loaders.cpp
+    io/test_data_manager.cpp
 )
 
 add_morpheus_test(

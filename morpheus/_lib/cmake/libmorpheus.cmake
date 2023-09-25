@@ -17,8 +17,12 @@ include(GenerateExportHeader)
 add_library(morpheus
 
   # Keep these sorted!
-  src/io/data_loader_registry.cpp
   src/io/data_loader.cpp
+  src/io/data_loader_registry.cpp
+  src/io/data_manager.cpp
+  src/io/data_record/data_record_base.cpp
+  src/io/data_record/disk_record.cpp
+  src/io/data_record/memory_record.cpp
   src/io/deserializers.cpp
   src/io/loaders/file.cpp
   src/io/loaders/grpc.cpp
@@ -27,21 +31,21 @@ add_library(morpheus
   src/io/loaders/rest.cpp
   src/io/serializers.cpp
   src/messages/control.cpp
+  src/messages/memory/inference_memory.cpp
+  src/messages/memory/inference_memory.cpp
   src/messages/memory/inference_memory_fil.cpp
   src/messages/memory/inference_memory_nlp.cpp
-  src/messages/memory/inference_memory.cpp
-  src/messages/memory/inference_memory.cpp
-  src/messages/memory/response_memory_probs.cpp
   src/messages/memory/response_memory.cpp
+  src/messages/memory/response_memory_probs.cpp
   src/messages/memory/tensor_memory.cpp
   src/messages/meta.cpp
+  src/messages/multi.cpp
+  src/messages/multi_inference.cpp
   src/messages/multi_inference_fil.cpp
   src/messages/multi_inference_nlp.cpp
-  src/messages/multi_inference.cpp
-  src/messages/multi_response_probs.cpp
   src/messages/multi_response.cpp
+  src/messages/multi_response_probs.cpp
   src/messages/multi_tensor.cpp
-  src/messages/multi.cpp
   src/modules/data_loader_module.cpp
   src/objects/data_table.cpp
   src/objects/dev_mem_info.cpp
@@ -53,19 +57,19 @@ add_library(morpheus
   src/objects/python_data_table.cpp
   src/objects/rmm_tensor.cpp
   src/objects/table_info.cpp
-  src/objects/tensor_object.cpp
   src/objects/tensor.cpp
+  src/objects/tensor_object.cpp
   src/objects/wrapped_tensor.cpp
   src/stages/add_classification.cpp
-  src/stages/add_scores_stage_base.cpp
   src/stages/add_scores.cpp
+  src/stages/add_scores_stage_base.cpp
   src/stages/deserialize.cpp
   src/stages/file_source.cpp
   src/stages/filter_detection.cpp
+  src/stages/http_server_source_stage.cpp
   src/stages/kafka_source.cpp
   src/stages/preprocess_fil.cpp
   src/stages/preprocess_nlp.cpp
-  src/stages/http_server_source_stage.cpp
   src/stages/serialize.cpp
   src/stages/triton_inference.cpp
   src/stages/write_to_file.cpp

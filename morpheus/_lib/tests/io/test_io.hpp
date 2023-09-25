@@ -17,6 +17,7 @@
 
 #pragma once
 
+#include "morpheus/io/data_manager.hpp"
 #include "../test_utils/common.hpp"  // IWYU pragma: associated
 
 namespace morpheus::test {
@@ -24,5 +25,20 @@ namespace morpheus::test {
 using TestLoader             = TestWithPythonInterpreter;  // NOLINT
 using TestDataLoader         = TestWithPythonInterpreter;  // NOLINT
 using TestDataLoaderRegistry = TestWithPythonInterpreter;  // NOLINT
+
+class DataManagerTest : public ::testing::Test {
+  protected:
+    morpheus::io::DataManager m_data_manager; // Instance of the class under test
+
+    // SetUp will be called before each test in this fixture
+    void SetUp() override {
+        // Initialization code here
+    }
+
+    // TearDown will be called after each test in this fixture
+    void TearDown() override {
+        // Cleanup code here
+    }
+};
 
 }  // namespace morpheus::test

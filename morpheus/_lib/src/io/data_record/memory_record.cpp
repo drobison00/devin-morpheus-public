@@ -30,8 +30,12 @@ void MemoryRecord::create(const uint8_t* bytes, std::size_t size)
     }
 }
 
-void MemoryRecord::remove()
-{}
+std::shared_ptr<uint8_t> MemoryRecord::read()
+{
+    return nullptr;
+}
+
+void MemoryRecord::remove() {}
 
 std::string MemoryRecord::backing_store() const
 {

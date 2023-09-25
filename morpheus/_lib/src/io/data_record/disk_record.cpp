@@ -31,6 +31,11 @@ void DiskRecord::create(const uint8_t* bytes, std::size_t size)
     }
 }
 
+std::shared_ptr<uint8_t> DiskRecord::read()
+{
+    return nullptr;
+}
+
 void DiskRecord::remove()
 {}
 

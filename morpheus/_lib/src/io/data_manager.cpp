@@ -126,6 +126,26 @@ std::vector<std::string> DataManager::get_manifest()
     return manifest;
 }
 
+std::tuple<std::shared_ptr<uint8_t>, std::size_t> DataManager::read(const std::string& uuid)
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    auto it = m_records.find(uuid);
+    if (it == m_records.end())
+    {
+        throw std::runtime_error("Record not found");
+    }
+
+    std::size_t size = it->second->size_bytes();
+    auto data = it->second->read();
+
+    return std::make_tuple(data, size);
+}
+
+std::future<std::tuple<std::shared_ptr<uint8_t>, std::size_t>> DataManager::read_async(const std::string& uuid)
+{
+    return std::async(std::launch::async, [this, uuid]() { return this->read(uuid); });
+}
+
 bool DataManager::remove(const std::string& uuid_str)
 {
     std::lock_guard<std::mutex> lock(m_mutex);

@@ -18,6 +18,7 @@
 #pragma once
 
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <string>
 #include <vector>
@@ -28,10 +29,15 @@ class DataRecord
   public:
     virtual ~DataRecord()                                       = default;
     virtual void create(const uint8_t* bytes, std::size_t size) = 0;
-    // virtual std::optional<std::vector<uint8_t>> Read() = 0;
+    virtual std::shared_ptr<uint8_t> read()                     = 0;
     // virtual std::optional<bool> Update(const std::vector<uint8_t>& new_data) = 0;
     virtual void remove() = 0;
 
     virtual std::string backing_store() const = 0;
+
+    std::size_t size_bytes() const;
+
+  protected:
+    std::size_t m_size_bytes = 0;
 };
 }  // namespace morpheus::io

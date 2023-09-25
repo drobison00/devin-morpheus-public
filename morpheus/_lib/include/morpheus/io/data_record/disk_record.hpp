@@ -18,6 +18,7 @@
 #pragma once
 
 #include <cstdint>
+#include <memory>
 
 #include "data_record_base.hpp"
 
@@ -25,6 +26,7 @@ namespace morpheus::io {
 class DiskRecord : public DataRecord
 {
     void create(const uint8_t* bytes, std::size_t size) override;
+    std::shared_ptr<uint8_t> read() override;
     void remove() override;
 
     std::string backing_store() const override;

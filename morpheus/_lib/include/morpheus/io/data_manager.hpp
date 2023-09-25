@@ -37,7 +37,8 @@ namespace morpheus::io {
 /**
  * @brief Enum class representing different types of data records.
  */
-enum class DataRecordType {
+enum class DataRecordType
+{
     memory,  ///< Represents a memory-based data record.
     disk,    ///< Represents a disk-based data record.
     // Additional types can be added here.
@@ -54,70 +55,87 @@ std::string data_record_type_to_string(DataRecordType type);
 /**
  * @brief Manages DataRecords with different storage backends.
  */
-class DataManager {
+class DataManager
+{
   public:
     ~DataManager() = default;
-    DataManager() = default;
+    DataManager()  = default;
 
     /**
-   * @brief Creates a data record with the given type and data.
-   *
-   * @param type : The type of the data record.
-   * @param bytes : A pointer to the raw byte data.
-   * @param size : The size of the raw byte data.
-   * @return The UUID of the created data record.
+     * @brief Creates a data record with the given type and data.
+     *
+     * @param type : The type of the data record.
+     * @param bytes : A pointer to the raw byte data.
+     * @param size : The size of the raw byte data.
+     * @return The UUID of the created data record.
      */
     std::string create(DataRecordType type, const uint8_t* bytes, std::size_t size);
 
     /**
-   * @brief Overloaded method to create a data record with a vector of bytes.
-   *
-   * @param type : The type of the data record.
-   * @param bytes : A vector of bytes.
-   * @return The UUID of the created data record.
+     * @brief Overloaded method to create a data record with a vector of bytes.
+     *
+     * @param type : The type of the data record.
+     * @param bytes : A vector of bytes.
+     * @return The UUID of the created data record.
      */
     std::string create(DataRecordType type, const std::vector<uint8_t>& bytes);
 
     /**
-   * @brief Creates a data record asynchronously with the given type and data.
-   *
-   * @param type : The type of the data record.
-   * @param bytes : A pointer to the raw byte data.
-   * @param size : The size of the raw byte data.
-   * @return A std::future containing the UUID of the created data record.
+     * @brief Creates a data record asynchronously with the given type and data.
+     *
+     * @param type : The type of the data record.
+     * @param bytes : A pointer to the raw byte data.
+     * @param size : The size of the raw byte data.
+     * @return A std::future containing the UUID of the created data record.
      */
     std::future<std::string> create_async(DataRecordType type, const uint8_t* bytes, std::size_t size);
 
     /**
-   * @brief Overloaded method to asynchronously create a data record with a vector of bytes.
-   *
-   * @param type : The type of the data record.
-   * @param bytes : A vector of bytes.
-   * @return A std::future containing the UUID of the created data record.
+     * @brief Overloaded method to asynchronously create a data record with a vector of bytes.
+     *
+     * @param type : The type of the data record.
+     * @param bytes : A vector of bytes.
+     * @return A std::future containing the UUID of the created data record.
      */
     std::future<std::string> create_async(DataRecordType type, const std::vector<uint8_t>& bytes);
 
     /**
-   * @brief Retrieves the manifest containing all stored UUIDs.
-   * @note not const, because we have to lock a mutex.
-   *
-   * @return A vector of UUID strings representing all stored data records.
+     * @brief Retrieves the manifest containing all stored UUIDs.
+     * @note not const, because we have to lock a mutex.
+     *
+     * @return A vector of UUID strings representing all stored data records.
      */
     std::vector<std::string> get_manifest();
 
     /**
-   * @brief Deletes a data record with the given UUID.
-   *
-   * @param uuid : The UUID of the data record to delete.
-   * @return True if the data record was successfully deleted, false otherwise.
+     * @brief Reads data from a given UUID.
+     *
+     * @param uuid The UUID of the data record.
+     * @return A tuple containing a shared_ptr to the data and its size.
+     */
+    std::tuple<std::shared_ptr<uint8_t>, std::size_t> read(const std::string& uuid);
+
+    /**
+     * @brief Asynchronously reads data from a given UUID.
+     *
+     * @param uuid The UUID of the data record.
+     * @return A future that will contain a tuple of shared_ptr to the data and its size.
+     */
+    std::future<std::tuple<std::shared_ptr<uint8_t>, std::size_t>> read_async(const std::string& uuid);
+
+    /**
+     * @brief Deletes a data record with the given UUID.
+     *
+     * @param uuid : The UUID of the data record to delete.
+     * @return True if the data record was successfully deleted, false otherwise.
      */
     bool remove(const std::string& uuid);
 
     /**
-   * @brief Deletes a data record asynchronously with the given UUID.
-   *
-   * @param uuid : The UUID of the data record to delete.
-   * @return A std::future containing a boolean indicating if the record was successfully deleted.
+     * @brief Deletes a data record asynchronously with the given UUID.
+     *
+     * @param uuid : The UUID of the data record to delete.
+     * @return A std::future containing a boolean indicating if the record was successfully deleted.
      */
     std::future<bool> remove_async(const std::string& uuid);
 

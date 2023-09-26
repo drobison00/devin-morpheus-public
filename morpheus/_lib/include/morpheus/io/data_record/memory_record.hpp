@@ -25,11 +25,55 @@
 namespace morpheus::io {
 class MemoryRecord : public DataRecord
 {
+  public:
+    MemoryRecord()  = default;
+
+    /**
+     * @brief Creates a new data record in memory.
+     *
+     * This method will allocate memory and copy the provided byte data into it.
+     *
+     * @param bytes : Pointer to the byte data to store.
+     * @param size : Size of the data to store, in bytes.
+     */
     void create(const uint8_t* bytes, std::size_t size) override;
+
+    /**
+     * @brief Reads the data record from memory.
+     *
+     * Returns a shared_ptr to the data stored in memory.
+     *
+     * @return A std::shared_ptr<uint8_t> containing the stored data.
+     */
     std::shared_ptr<uint8_t> read() override;
+
+    /**
+     * @brief Removes the data record from memory.
+     *
+     * This method will free the memory occupied by the data record.
+     */
     void remove() override;
+
+    /**
+     * @brief Updates the data record in memory.
+     *
+     * This method will reallocate memory and copy the new byte data into it.
+     *
+     * @param bytes : Pointer to the new byte data to store.
+     * @param size : Size of the new data to store, in bytes.
+     */
     void update(const uint8_t* bytes, std::size_t size) override;
 
+    /**
+     * @brief Returns the type of backing store used for this data record.
+     *
+     * For a MemoryRecord, this will always return "Memory".
+     *
+     * @return A string representing the type of backing store.
+     */
     std::string backing_store() const override;
+
+  private:
+    std::shared_ptr<uint8_t> m_data;
 };
 }  // namespace morpheus::io

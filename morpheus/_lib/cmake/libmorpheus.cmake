@@ -17,6 +17,7 @@ include(GenerateExportHeader)
 add_library(morpheus
 
   # Keep these sorted!
+  src/io/cache_manager.cpp
   src/io/data_loader.cpp
   src/io/data_loader_registry.cpp
   src/io/data_manager.cpp

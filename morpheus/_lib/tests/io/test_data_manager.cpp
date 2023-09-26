@@ -16,12 +16,14 @@
  */
 
 #include "../test_utils/common.hpp"  // IWYU pragma: associated
+#include "mock_data_record.hpp"
 #include "test_io.hpp"
 
 #include "morpheus/io/data_manager.hpp"
 
 #include <gtest/gtest.h>
 
+#include <future>
 #include <thread>
 
 using namespace morpheus;
@@ -94,10 +96,8 @@ TEST_F(DataManagerTest, CreateRecordFromVector)
     DataManager manager;
     std::vector<uint8_t> data = {1, 2, 3, 4, 5};
 
-    ASSERT_NO_THROW({
-        std::string uuid = manager.create(DataRecordType::memory, data);
-        // Add code to validate UUID format if needed.
-    }) << "Failed to create DataRecord from std::vector<uint8_t>";
+    ASSERT_NO_THROW({ std::string uuid = manager.create(DataRecordType::memory, data); })
+        << "Failed to create DataRecord from std::vector<uint8_t>";
 }
 
 TEST_P(DataManagerParameterizedTypeTest, CreateRecord)
@@ -106,10 +106,26 @@ TEST_P(DataManagerParameterizedTypeTest, CreateRecord)
     auto type        = GetParam();
     uint8_t bytes[5] = {1, 2, 3, 4, 5};
 
-    ASSERT_NO_THROW({
-        std::string uuid = manager.create(type, bytes, 5);
-        // Add code to validate uuid format if needed.
-    });
+    ASSERT_NO_THROW({ std::string uuid = manager.create(type, bytes, 5); });
+}
+
+TEST_F(DataManagerTest, CreateWithFactoryFunction)
+{
+    DataManager manager;
+    auto factory_func         = []() -> std::unique_ptr<DataRecord> { return std::make_unique<MockDataRecordType1>(); };
+    std::vector<uint8_t> data = {0, 1, 2, 3};
+    auto uuid                 = manager.create(factory_func, data.data(), data.size());
+    EXPECT_FALSE(uuid.empty());
+}
+
+TEST_F(DataManagerTest, CreateAsyncWithFactoryFunction)
+{
+    DataManager manager;
+    auto factory_func         = []() -> std::unique_ptr<DataRecord> { return std::make_unique<MockDataRecordType1>(); };
+    std::vector<uint8_t> data = {0, 1, 2, 3};
+    auto future               = manager.create_async(factory_func, data);
+    auto uuid                 = future.get();
+    EXPECT_FALSE(uuid.empty());
 }
 
 TEST_P(DataManagerParameterizedTypeTest, CreateRecordFailure)
@@ -255,3 +271,198 @@ TEST_F(DataManagerTest, GetManifestWithAsyncAndSync)
         ASSERT_TRUE(std::find(manifest.begin(), manifest.end(), uuid) != manifest.end());
     }
 }
+
+TEST_F(DataManagerTest, SyncReadAndUpdate)
+{
+    DataManager dm;
+
+    auto factory_func = []() -> std::unique_ptr<DataRecord> { return std::make_unique<MockDataRecordType1>(); };
+    std::vector<uint8_t> initial_data = {1, 2, 3};
+    std::string uuid                  = dm.create(factory_func, initial_data.data(), initial_data.size());
+
+    std::vector<uint8_t> new_data = {4, 5, 6};
+    dm.update(uuid, new_data.data(), new_data.size());
+
+    auto [updated_data, size] = dm.read(uuid);
+    std::vector<uint8_t> updated_data_(updated_data.get(), updated_data.get() + size);
+    ASSERT_EQ(new_data, updated_data_);
+}
+
+TEST_F(DataManagerTest, SyncReadAndMove)
+{
+    DataManager dm;
+
+    auto factory_func1 = []() -> std::unique_ptr<DataRecord> { return std::make_unique<MockDataRecordType1>(); };
+    auto factory_func2 = []() -> std::unique_ptr<DataRecord> { return std::make_unique<MockDataRecordType2>(); };
+    std::vector<uint8_t> initial_data = {1, 2, 3};
+    std::string uuid                  = dm.create(factory_func1, initial_data.data(), initial_data.size());
+
+    dm.move(uuid, factory_func2);
+
+    auto [moved_data, size] = dm.read(uuid);
+    std::vector<uint8_t> moved_data_(moved_data.get(), moved_data.get() + size);
+    ASSERT_EQ(initial_data, moved_data_);
+}
+
+TEST_F(DataManagerTest, SyncUpdateMoveUpdate)
+{
+    DataManager dm;
+
+    auto factory_func1 = []() -> std::unique_ptr<DataRecord> { return std::make_unique<MockDataRecordType1>(); };
+    auto factory_func2 = []() -> std::unique_ptr<DataRecord> { return std::make_unique<MockDataRecordType2>(); };
+    std::vector<uint8_t> initial_data = {1, 2, 3};
+    std::string uuid                  = dm.create(factory_func1, initial_data.data(), initial_data.size());
+
+    std::vector<uint8_t> update_data = {4, 5, 6};
+    dm.update(uuid, update_data.data(), update_data.size());
+
+    dm.move(uuid, factory_func2);
+
+    std::vector<uint8_t> final_data = {7, 8, 9};
+    dm.update(uuid, final_data.data(), final_data.size());
+
+    auto [result_data, size] = dm.read(uuid);
+    std::vector<uint8_t> result_data_(result_data.get(), result_data.get() + size);
+
+    ASSERT_EQ(final_data, result_data_);
+}
+
+TEST_F(DataManagerTest, SyncMoveUpdateMove)
+{
+    DataManager dm;
+
+    auto factory_func1 = []() -> std::unique_ptr<DataRecord> { return std::make_unique<MockDataRecordType1>(); };
+    auto factory_func2 = []() -> std::unique_ptr<DataRecord> { return std::make_unique<MockDataRecordType2>(); };
+    std::vector<uint8_t> initial_data = {1, 2, 3};
+    std::string uuid                  = dm.create(factory_func1, initial_data.data(), initial_data.size());
+
+    dm.move(uuid, factory_func1);
+
+    std::vector<uint8_t> update_data = {4, 5, 6};
+    dm.update(uuid, update_data.data(), update_data.size());
+
+    dm.move(uuid, factory_func2);
+
+    auto [result_data, size] = dm.read(uuid);
+    std::vector<uint8_t> result_data_(result_data.get(), result_data.get() + size);
+
+    ASSERT_EQ(update_data, result_data_);
+}
+
+TEST_F(DataManagerTest, AsyncUpdate)
+{
+    DataManager dm;
+
+    auto factory_func1 = []() -> std::unique_ptr<DataRecord> { return std::make_unique<MockDataRecordType1>(); };
+    std::vector<uint8_t> initial_data = {1, 2, 3};
+    std::vector<uint8_t> update_data  = {4, 5, 6};
+
+    auto uuid = dm.create(factory_func1, initial_data.data(), initial_data.size());
+
+    // Asynchronous Update
+    auto update_future = dm.update_async(uuid, update_data.data(), update_data.size());
+    update_future.wait();
+
+    // Validate Update
+    auto [result_data, size] = dm.read(uuid);
+    std::vector<uint8_t> result_data_(result_data.get(), result_data.get() + size);
+    ASSERT_EQ(update_data, result_data_);
+}
+
+TEST_F(DataManagerTest, AsyncMove)
+{
+    DataManager dm;
+
+    auto factory_func1 = []() -> std::unique_ptr<DataRecord> { return std::make_unique<MockDataRecordType1>(); };
+    auto factory_func2 = []() -> std::unique_ptr<DataRecord> { return std::make_unique<MockDataRecordType2>(); };
+    std::vector<uint8_t> initial_data = {7, 8, 9};
+
+    auto uuid = dm.create(factory_func1, initial_data.data(), initial_data.size());
+
+    // Asynchronous Move
+    auto move_future = dm.move_async(uuid, factory_func2);
+    move_future.wait();
+
+    // Validate Move
+    auto [result_data, size] = dm.read(uuid);
+    std::vector<uint8_t> result_data_(result_data.get(), result_data.get() + size);
+    ASSERT_EQ(initial_data, result_data_);
+}
+
+TEST_F(DataManagerTest, AsyncMoveAndUpdate)
+{
+    DataManager dm;
+
+    auto factory_func1 = []() -> std::unique_ptr<DataRecord> { return std::make_unique<MockDataRecordType1>(); };
+    auto factory_func2 = []() -> std::unique_ptr<DataRecord> { return std::make_unique<MockDataRecordType2>(); };
+    std::vector<uint8_t> initial_data = {10, 11, 12};
+    std::vector<uint8_t> update_data  = {13, 14, 15};
+
+    auto uuid = dm.create(factory_func1, initial_data.data(), initial_data.size());
+
+    // Asynchronous Move and Update
+    auto move_future = dm.move_async(uuid, factory_func2);
+    move_future.wait();
+
+    auto update_future = dm.update_async(uuid, update_data.data(), update_data.size());
+    update_future.wait();
+
+    // Validate Move and Update
+    auto [result_data, size] = dm.read(uuid);
+    std::vector<uint8_t> result_data_(result_data.get(), result_data.get() + size);
+    ASSERT_EQ(update_data, result_data_);
+}
+
+TEST_F(DataManagerTest, TestZeroLengthData) {
+    DataManager dm;
+
+    std::vector<uint8_t> zero_length_data;
+    try {
+        auto uuid = dm.create(DataRecordType::memory, zero_length_data);
+        FAIL() << "Expected std::runtime_error";
+    } catch (std::runtime_error const & err) {
+        ASSERT_NE(std::string(err.what()).find("invalid data pointer"), std::string::npos);
+    } catch (...) {
+        FAIL() << "Expected std::runtime_error";
+    }
+}
+
+TEST_F(DataManagerTest, TestUpdateWithNullPtr) {
+    DataManager dm;
+
+    // Create a record with some initial data
+    std::vector<uint8_t> initial_data = {1, 2, 3};
+    auto uuid = dm.create(DataRecordType::memory, initial_data);
+
+    // Update with nullptr and zero size
+    try {
+        dm.update(uuid, nullptr, 0);
+        FAIL() << "Expected std::runtime_error";
+    } catch (std::runtime_error const & err) {
+        ASSERT_NE(std::string(err.what()).find("invalid data pointer"), std::string::npos);
+    } catch (...) {
+        FAIL() << "Expected std::runtime_error";
+    }
+}
+
+TEST_F(DataManagerTest, TestFailingFactoryFunction) {
+    DataManager dm;
+
+    // Create a record with some initial data
+    std::vector<uint8_t> initial_data = {1, 2, 3};
+    auto uuid = dm.create(DataRecordType::memory, initial_data);
+
+    // Failing factory function that returns nullptr
+    auto failing_factory_func = []() -> std::unique_ptr<DataRecord> { return nullptr; };
+
+    try {
+        // Attempt to move
+        dm.move(uuid, failing_factory_func);
+        FAIL() << "Expected std::runtime_error";
+    } catch (std::runtime_error const & err) {
+        ASSERT_EQ(err.what(), std::string("Failed to create new DataRecord"));
+    } catch (...) {
+        FAIL() << "Expected std::runtime_error";
+    }
+}
+

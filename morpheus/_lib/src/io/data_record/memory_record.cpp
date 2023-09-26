@@ -35,7 +35,20 @@ std::shared_ptr<uint8_t> MemoryRecord::read()
     return nullptr;
 }
 
-void MemoryRecord::remove() {}
+void MemoryRecord::remove()
+{
+    // TODO: Implement: clean up any existing resources
+}
+
+void MemoryRecord::update(const uint8_t* bytes, std::size_t size)
+{
+    if (bytes == nullptr)
+    {
+        std::string error_message = "Failed to update 'memory' record: invalid data pointer";
+        LOG(ERROR) << error_message;
+        throw std::runtime_error(error_message);
+    }
+}
 
 std::string MemoryRecord::backing_store() const
 {

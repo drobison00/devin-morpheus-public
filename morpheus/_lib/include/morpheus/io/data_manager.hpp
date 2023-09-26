@@ -39,6 +39,7 @@ namespace morpheus::io {
  */
 enum class DataRecordType
 {
+    same,    ///< Represents a data record with the same type as the original.
     memory,  ///< Represents a memory-based data record.
     disk,    ///< Represents a disk-based data record.
     // Additional types can be added here.
@@ -73,6 +74,27 @@ class DataManager
     std::string create(DataRecordType type, const std::vector<uint8_t>& bytes);
 
     /**
+     * @brief Creates a data record with the given type and data.
+     *
+     * @param factory_func : A function that returns a unique_ptr to a DataRecord.
+     * @param bytes : A pointer to the raw byte data.
+     * @param size : The size of the raw byte data.
+     * @return The UUID of the created data record.
+     */
+    std::string create(std::function<std::unique_ptr<DataRecord>()> factory_func,
+                       const uint8_t* bytes,
+                       std::size_t size);
+
+    /**
+     * @brief Overloaded method to create a data record with a vector of bytes.
+     *
+     * @param factory_func : A function that returns a unique_ptr to a DataRecord.
+     * @param bytes : A vector of bytes.
+     * @return The UUID of the created data record.
+     */
+    std::string create(std::function<std::unique_ptr<DataRecord>()> factory_func, const std::vector<uint8_t>& bytes);
+
+    /**
      * @brief Creates a data record asynchronously with the given type and data.
      *
      * @param type : The type of the data record.
@@ -90,6 +112,28 @@ class DataManager
      * @return A std::future containing the UUID of the created data record.
      */
     std::future<std::string> create_async(DataRecordType type, const std::vector<uint8_t>& bytes);
+
+    /**
+     * @brief Asynchronously creates a new DataRecord using a custom factory function.
+     *
+     * @param factory_func A function that returns a std::unique_ptr<DataRecord> when called.
+     * @param bytes Pointer to the raw byte data to be stored.
+     * @param size Size of the raw byte data in bytes.
+     * @return std::future<std::string> Future that will hold the UUID of the created DataRecord.
+     */
+    std::future<std::string> create_async(std::function<std::unique_ptr<DataRecord>()> factory_func,
+                                          const uint8_t* bytes,
+                                          std::size_t size);
+
+    /**
+     * @brief Asynchronously creates a new DataRecord using a custom factory function.
+     *
+     * @param factory_func A function that returns a std::unique_ptr<DataRecord> when called.
+     * @param bytes std::vector containing the raw byte data to be stored.
+     * @return std::future<std::string> Future that will hold the UUID of the created DataRecord.
+     */
+    std::future<std::string> create_async(std::function<std::unique_ptr<DataRecord>()> factory_func,
+                                          const std::vector<uint8_t>& bytes);
 
     /**
      * @brief Retrieves the manifest containing all stored UUIDs.
@@ -132,25 +176,73 @@ class DataManager
     std::future<bool> remove_async(const std::string& uuid);
 
     /**
-     * @brief Updates the data for a specific record identified by its UUID.
+     * @brief Updates a data record with the given UUID, using raw byte data.
      *
-     * @param uuid The UUID of the record to update.
-     * @param bytes A pointer to the new byte data.
-     * @param size The size of the new data.
+     * @param uuid : The UUID of the data record to update.
+     * @param bytes : A pointer to the raw bytes to use for the update.
+     * @param size : The size in bytes of the data to update.
      */
     void update(const std::string& uuid, const uint8_t* bytes, std::size_t size);
 
     /**
-     * @brief Overloaded update function to update the backing store of a specific record.
+     * @brief Updates a data record with the given UUID, using a std::vector of bytes.
      *
-     * @param uuid The UUID of the record to update.
-     * @param new_type The new type of the data record (e.g., memory, disk).
+     * @param uuid : The UUID of the data record to update.
+     * @param bytes : A std::vector containing the bytes to use for the update.
      */
-    void update(const std::string& uuid, DataRecordType new_type);
+    void update(const std::string& uuid, const std::vector<uint8_t>& bytes);
+
+    /**
+     * @brief Asynchronously updates a data record with the given UUID, using raw byte data.
+     *
+     * @param uuid : The UUID of the data record to update.
+     * @param bytes : A pointer to the raw bytes to use for the update.
+     * @param size : The size in bytes of the data to update.
+     * @return A std::future representing the asynchronous operation.
+     */
+    std::future<void> update_async(const std::string& uuid, const uint8_t* bytes, std::size_t size);
+
+    /**
+     * @brief Asynchronously updates a data record with the given UUID, using a std::vector of bytes.
+     *
+     * @param uuid : The UUID of the data record to update.
+     * @param bytes : A std::vector containing the bytes to use for the update.
+     * @return A std::future representing the asynchronous operation.
+     */
+    std::future<void> update_async(const std::string& uuid, const std::vector<uint8_t>& bytes);
+
+    /**
+     * @brief Moves a data record with the given UUID to a different DataRecordType.
+     *
+     * @param uuid : The UUID of the data record to move.
+     * @param new_type : The new DataRecordType to move the record to.
+     */
+    void move(const std::string& uuid, DataRecordType new_type);
+
+    void move(const std::string& uuid, std::function<std::unique_ptr<DataRecord>()> factory_func);
+
+    /**
+     * @brief Asynchronously moves a data record with the given UUID to a different DataRecordType.
+     *
+     * @param uuid : The UUID of the data record to move.
+     * @param new_type : The new DataRecordType to move the record to.
+     * @return A std::future representing the asynchronous operation.
+     */
+    std::future<void> move_async(const std::string& uuid, DataRecordType new_type);
+
+    std::future<void> move_async(const std::string& uuid, std::function<std::unique_ptr<DataRecord>()> factory_func);
 
   private:
     std::mutex m_mutex;
     std::map<std::string, std::unique_ptr<DataRecord>> m_records;
+
+    std::string create_(std::function<std::unique_ptr<DataRecord>()> factory_func,
+                        const uint8_t* bytes,
+                        std::size_t size);
+
+    void update_(const std::string& uuid, const uint8_t* bytes, std::size_t size);
+
+    void move_(const std::string& uuid, std::function<std::unique_ptr<DataRecord>()> factory_func);
 };
 
 #pragma GCC visibility pop

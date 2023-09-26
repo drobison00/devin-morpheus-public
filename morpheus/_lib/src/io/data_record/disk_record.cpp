@@ -37,7 +37,20 @@ std::shared_ptr<uint8_t> DiskRecord::read()
 }
 
 void DiskRecord::remove()
-{}
+{
+    // TODO: Implement: clean up any existing resources
+}
+
+void DiskRecord::update(const uint8_t* bytes, std::size_t size)
+{
+    if (bytes == nullptr)
+    {
+        std::string error_message = "Failed to update 'disk' record: invalid data pointer";
+        LOG(ERROR) << error_message;
+
+        throw std::runtime_error(error_message);
+    }
+}
 
 std::string DiskRecord::backing_store() const
 {

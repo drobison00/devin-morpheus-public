@@ -24,17 +24,72 @@
 #include <vector>
 
 namespace morpheus::io {
+/**
+ * @brief Abstract base class for a data record.
+ *
+ * This class defines the interface for a data record, which could be
+ * stored in various backing stores like memory, disk, etc. It provides
+ * methods to create, read, update, and remove the record.
+ */
 class DataRecord
 {
   public:
-    virtual ~DataRecord()                                       = default;
+    virtual ~DataRecord() = default;
+
+    /**
+     * @brief Create a new data record.
+     *
+     * This function is responsible for creating a new data record with the
+     * given bytes and size.
+     *
+     * @param bytes Pointer to the byte array containing the data.
+     * @param size Number of bytes in the array.
+     */
     virtual void create(const uint8_t* bytes, std::size_t size) = 0;
-    virtual std::shared_ptr<uint8_t> read()                     = 0;
-    // virtual std::optional<bool> Update(const std::vector<uint8_t>& new_data) = 0;
+
+    /**
+     * @brief Read the data record.
+     *
+     * Reads the contents of the data record and returns it along with its size.
+     *
+     * @return A tuple containing a shared_ptr to the byte array and its size.
+     */
+    virtual std::shared_ptr<uint8_t> read() = 0;
+
+    /**
+     * @brief Update the data record.
+     *
+     * Updates the existing record with new bytes and size.
+     *
+     * @param bytes Pointer to the byte array containing the new data.
+     * @param size Number of bytes in the new array.
+     */
+    virtual void update(const uint8_t* bytes, std::size_t size) = 0;
+
+    /**
+     * @brief Remove the data record.
+     *
+     * Removes or deletes the data record, freeing any resources it was using.
+     */
     virtual void remove() = 0;
 
+    /**
+     * @brief Retrieve the type of the backing store.
+     *
+     * Returns a string representing the type of the backing store for this
+     * record (e.g., "memory", "disk").
+     *
+     * @return A string indicating the type of the backing store.
+     */
     virtual std::string backing_store() const = 0;
 
+    /**
+     * @brief Get the size of the record in bytes.
+     *
+     * Returns the size of the record data in bytes.
+     *
+     * @return The size of the record in bytes.
+     */
     std::size_t size_bytes() const;
 
   protected:

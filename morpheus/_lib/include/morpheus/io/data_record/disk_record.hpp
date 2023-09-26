@@ -28,6 +28,7 @@ class DiskRecord : public DataRecord
     void create(const uint8_t* bytes, std::size_t size) override;
     std::shared_ptr<uint8_t> read() override;
     void remove() override;
+    void update(const uint8_t* bytes, std::size_t size) override;
 
     std::string backing_store() const override;
 };

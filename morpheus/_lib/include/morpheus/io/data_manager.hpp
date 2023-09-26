@@ -45,14 +45,6 @@ enum class DataRecordType
 };
 
 /**
- * @brief Converts an enum value of type DataRecordType to its string representation.
- *
- * @param type : The type of data record.
- * @return The string representation of the data record type.
- */
-std::string data_record_type_to_string(DataRecordType type);
-
-/**
  * @brief Manages DataRecords with different storage backends.
  */
 class DataManager
@@ -138,6 +130,23 @@ class DataManager
      * @return A std::future containing a boolean indicating if the record was successfully deleted.
      */
     std::future<bool> remove_async(const std::string& uuid);
+
+    /**
+     * @brief Updates the data for a specific record identified by its UUID.
+     *
+     * @param uuid The UUID of the record to update.
+     * @param bytes A pointer to the new byte data.
+     * @param size The size of the new data.
+     */
+    void update(const std::string& uuid, const uint8_t* bytes, std::size_t size);
+
+    /**
+     * @brief Overloaded update function to update the backing store of a specific record.
+     *
+     * @param uuid The UUID of the record to update.
+     * @param new_type The new type of the data record (e.g., memory, disk).
+     */
+    void update(const std::string& uuid, DataRecordType new_type);
 
   private:
     std::mutex m_mutex;

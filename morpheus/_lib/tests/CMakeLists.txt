@@ -106,10 +106,11 @@ endfunction()
 add_morpheus_test(
   NAME io
   FILES
+    io/test_cache_manager.cpp
     io/test_data_loader.cpp
     io/test_data_loader_registry.cpp
-    io/test_loaders.cpp
     io/test_data_manager.cpp
+    io/test_loaders.cpp
 )
 
 add_morpheus_test(

@@ -17,6 +17,7 @@
 
 #pragma once
 
+#include <atomic>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -24,6 +25,24 @@
 #include <vector>
 
 namespace morpheus::io {
+#pragma GCC visibility push(default)
+struct InstanceStatistics
+{
+    std::size_t cache_hits;
+    std::size_t cache_misses;
+    std::size_t pinned_memory_bytes;
+    std::size_t total_objects_cached;
+};
+
+struct CacheStatistics
+{
+    std::size_t cache_instances;
+    std::size_t cache_hits;
+    std::size_t cache_misses;
+    std::size_t pinned_memory_bytes;
+    std::size_t total_objects_cached;
+};
+
 /**
  * @brief CacheManager class is responsible for managing all caching operations and policies.
  *
@@ -48,13 +67,29 @@ class CacheManager
      * @brief Store data into a specific cache instance.
      *
      * This method takes an instance ID and UUID to associate the data with a particular
-     * cache instance managed by the CacheManager.
+     * cache instance managed by the CacheManager. Additionally, you can specify
+     * whether the data should be pinned in memory and the size of the data.
      *
      * @param instance_id : ID of the cache instance.
      * @param uuid : The unique identifier for the data.
      * @param data : shared_ptr to the data to be stored.
+     * @param size : The size of the data to be cached.
+     * @param pin : Whether the data should be pinned in memory. Default is false.
+     * @return std::weak_ptr to the stored data.
      */
-    void store(int instance_id, const std::string& uuid, std::shared_ptr<uint8_t> data);
+    std::weak_ptr<uint8_t> store(
+        int instance_id, const std::string& uuid, std::shared_ptr<uint8_t> data, std::size_t size, bool pin = false);
+
+    /**
+     * @brief Evict an object from the cache based on its UUID.
+     * @note Attempting to remove something that doesn't exist is not an error, which is why we have a return value
+     * here.
+     *
+     * @param instance_id ID of the cache instance.
+     * @param uuid UUID of the object to remove.
+     * @return true if the object was successfully removed, false otherwise.
+     */
+    bool evict(int instance_id, const std::string& uuid);
 
     /**
      * @brief Retrieve data from a specific cache instance.
@@ -112,6 +147,15 @@ class CacheManager
      */
     double get_memory_utilization_threshold() const;
 
+    InstanceStatistics get_instance_statistics(int instance_id);
+
+    /**
+     * Get aggregated statistics across all active cache instances.
+     *
+     * @return CacheStatistics, aggregated stats of all instances
+     */
+    CacheStatistics get_statistics();
+
     // Methods to manage CacheInstance allocation
     int allocate_cache_instance();
     void free_cache_instance(int instance_id);
@@ -131,31 +175,66 @@ class CacheManager
     {
         struct CacheData
         {
+            bool pinned;
+
             std::shared_ptr<uint8_t> data;
             std::size_t size;
-            std::chrono::steady_clock::time_point last_access;
+            std::chrono::time_point<std::chrono::high_resolution_clock> last_access;
         };
 
+        std::mutex m_instance_mutex;
         std::unordered_map<std::string, CacheData> m_cache;
-        std::unique_ptr<std::mutex> m_instance_mutex;
+
+        // Statistics for this CacheInstance
+        std::atomic<std::size_t> m_cache_hits{0};
+        std::atomic<std::size_t> m_cache_misses{0};
+        std::atomic<std::size_t> m_total_cached_bytes{0};
+        std::atomic<std::size_t> m_pinned_memory_bytes{0};
+        std::atomic<std::size_t> m_total_objects_cached{0};
+
+        InstanceStatistics get_statistics() const;
+
+        bool evict(const std::string& uuid);
+
+        void reset()
+        {
+            m_cache.clear();  // Clear the cache
+            m_cache_hits           = 0;
+            m_cache_misses         = 0;
+            m_pinned_memory_bytes  = 0;
+            m_total_objects_cached = 0;
+        }
     };
 
-    std::vector<CacheInstance> m_cache_instances;  // Vector holding all cache instances
-    std::vector<bool> m_cache_instance_in_use;     // Vector indicating which instances are in use
+    std::vector<std::unique_ptr<CacheInstance>> m_cache_instances;  // Vector holding all cache instances
+    std::vector<std::unique_ptr<std::atomic_bool>>
+        m_cache_instance_in_use;  // Vector indicating which instances are in use
 
     // Configuration settings
     std::size_t m_max_cached_objects;
     std::size_t m_max_cached_bytes;
     double m_memory_utilization_threshold;
 
-    // Global count of cached bytes
+    // Global statistics
     std::size_t m_total_cached_bytes;
+    std::atomic<std::size_t> m_global_cache_instances{0};
+    std::atomic<std::size_t> m_global_cache_hits{0};
+    std::atomic<std::size_t> m_global_cache_misses{0};
+    std::atomic<std::size_t> m_global_pinned_memory_bytes{0};
+    std::atomic<std::size_t> m_global_total_objects_cached{0};
 
     // Mutex for ensuring thread safety during global operations
     mutable std::mutex m_global_mutex;
 
+    /**
+     * Flag that indicates whether the cache statistics are stale and need to be updated.
+     */
+    std::atomic<bool> m_dirty{false};
+
     // LRU eviction logic
     void lru_evict();
+
+    void update_global_statistics();
 };
 
 /**
@@ -186,15 +265,33 @@ class CacheManagerInterface
     std::weak_ptr<uint8_t> get(const std::string& uuid);
 
     /**
-     * @brief Stores data associated with a UUID in the cache.
+     * @brief Stores an object in the cache associated with a given UUID.
      *
-     * @param uuid : The unique identifier for the data.
-     * @param data : shared_ptr to the data to be stored.
+     * This method takes a shared pointer to the data object and a UUID string.
+     * It stores the object in the cache and returns a weak pointer to it,
+     * allowing temporary, non-owning access to the stored object.
+     *
+     * @param uuid : The universally unique identifier for the object.
+     * @param data : Shared pointer to the object to be stored.
+     * @param size : The size of the data to be cached.
+     * @param pin : Whether the data should be pinned in memory. Default is false.
+     * @return std::weak_ptr<uint8_t> : Weak pointer to the stored object.
      */
-    void store(const std::string& uuid, std::shared_ptr<uint8_t> data);
+    std::weak_ptr<uint8_t> store(const std::string& uuid,
+                                 std::shared_ptr<uint8_t> data,
+                                 std::size_t size,
+                                 bool pin = false);
+
+    /**
+     * @brief Evict an object from the cache based on its UUID.
+     *
+     * @param uuid UUID of the object to remove.
+     * @return true if the object was successfully removed, false otherwise.
+     */
+    bool evict(const std::string& uuid);
 
   private:
     int m_instance_id;  // The ID of the cache instance this interface operates on
 };
-
+#pragma GCC visibility pop
 }  // namespace morpheus::io

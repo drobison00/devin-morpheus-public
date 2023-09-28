@@ -44,40 +44,39 @@ CacheManager::CacheManager() :
 
 void CacheManager::set_max_cached_objects(std::size_t max)
 {
-    std::lock_guard<std::mutex> lock(m_global_mutex);
-    m_max_cached_objects = max;
+    m_max_cached_objects.store(max);
 }
 
 void CacheManager::set_max_cached_bytes(std::size_t max)
 {
-    std::lock_guard<std::mutex> lock(m_global_mutex);
-    m_max_cached_bytes = max;
+    m_max_cached_bytes.store(max);
 }
 
 void CacheManager::set_memory_utilization_threshold(double percentage)
 {
-    std::lock_guard<std::mutex> lock(m_global_mutex);
-    m_memory_utilization_threshold = percentage;
+    m_memory_utilization_threshold.store(percentage);
 }
 
 std::size_t CacheManager::get_max_cached_objects() const
 {
-    return m_max_cached_objects;
+    return m_max_cached_objects.load();
 }
 
 std::size_t CacheManager::get_max_cached_bytes() const
 {
-    return m_max_cached_bytes;
+    return m_max_cached_bytes.load();
 }
 
 double CacheManager::get_memory_utilization_threshold() const
 {
-    return m_memory_utilization_threshold;
+    return m_memory_utilization_threshold.load();
 }
 
 int CacheManager::allocate_cache_instance()
 {
-    std::lock_guard<std::mutex> lock(m_global_mutex);  // Lock to ensure thread-safety
+    std::scoped_lock<std::mutex> lock(m_cache_creation_mutex);
+
+    int instance_id = -1;
 
     // Search for an available cache instance slot
     for (std::size_t i = 0; i < m_cache_instance_in_use.size(); ++i)
@@ -85,34 +84,32 @@ int CacheManager::allocate_cache_instance()
         if (!m_cache_instance_in_use[i])
         {
             m_cache_instance_in_use[i]->store(true);  // Mark the instance as in use
-            return static_cast<int>(i);               // Return the instance index
+            instance_id = static_cast<int>(i);        // Return the instance index
         }
     }
 
-    auto instance = std::make_unique<CacheInstance>();
-
     // If no available slot, create a new unique_ptr to a CacheInstance
-    m_cache_instances.push_back(std::move(instance));
+    if (instance_id < 0)
+    {
+        auto instance = std::make_unique<CacheInstance>();
+        m_cache_instances.push_back(std::move(instance));
 
-    // Mark the new instance as in use
-    auto new_instance_index = std::make_unique<std::atomic<bool>>(true);
-    m_cache_instance_in_use.push_back(std::move(new_instance_index));
+        // Mark the new instance as in use
+        auto new_instance_index = std::make_unique<std::atomic<bool>>(true);
+        m_cache_instance_in_use.push_back(std::move(new_instance_index));
+
+        // Return the index of the new instance
+        instance_id = static_cast<int>(m_cache_instances.size() - 1);
+    }
+
     m_global_cache_instances += 1;
 
-    // Return the index of the new instance
-    return static_cast<int>(m_cache_instances.size() - 1);
+    return instance_id;
 }
 
 void CacheManager::free_cache_instance(int instance_id)
 {
-    // Validate the instance_id
-    if (instance_id < 0 || static_cast<std::size_t>(instance_id) >= m_cache_instance_in_use.size())
-    {
-        // Log error or throw exception
-        std::string error_message = "Invalid instance ID passed to free_cache_instance";
-        LOG(ERROR) << error_message;
-        return;
-    }
+    check_is_instance_valid(instance_id);
 
     // Reset instance properties and statistics
     m_cache_instances[instance_id]->reset();
@@ -132,24 +129,20 @@ bool exceeds_limits(std::size_t iid)
 std::weak_ptr<uint8_t> CacheManager::store(
     int instance_id, const std::string& uuid, std::shared_ptr<uint8_t> data, std::size_t size, bool pin)
 {
-    // Validate the instance ID
-    if (instance_id < 0 || instance_id >= m_cache_instances.size())
-    {
-        std::string error_string = "Invalid instance ID.";
-        LOG(ERROR) << error_string;
-
-        throw std::runtime_error(error_string);
-    }
+    check_is_instance_valid(instance_id);
 
     // Check if cache limits would be exceeded, and evict if necessary
-    while (exceeds_limits(instance_id))
+    while (exceeds_limits(instance_id)) // TODO
     {
         m_cache_instances[instance_id]->lru_evict();
     }
 
     // Create and insert new CacheData
     CacheInstance::CacheData cache_data = {uuid, pin, data, size, std::chrono::high_resolution_clock::now()};
+
+    // Scoped block
     {
+        std::scoped_lock<std::mutex> lock(m_cache_instances[instance_id]->m_instance_mutex);
         auto insert_result = m_cache_instances[instance_id]->m_cache.insert(cache_data);
 
         if (!insert_result.second)
@@ -190,17 +183,8 @@ bool CacheManager::evict(int instance_id, const std::string& uuid)
 
 std::weak_ptr<uint8_t> CacheManager::get(int instance_id, const std::string& uuid)
 {
-    // Validate the instance ID
-    if (instance_id < 0 || instance_id >= m_cache_instances.size())
-    {
-        std::string error_string = "Invalid instance ID.";
-        LOG(ERROR) << error_string;
-
-        throw std::runtime_error(error_string);
-    }
-
     // Acquire lock for the specific instance
-    std::lock_guard<std::mutex> lock(m_cache_instances[instance_id]->m_instance_mutex);
+    std::scoped_lock<std::mutex> lock(m_cache_instances[instance_id]->m_instance_mutex);
     m_dirty.store(true);
 
     auto& cache_index = m_cache_instances[instance_id]->m_cache.get<0>();  // The hashed index
@@ -252,6 +236,18 @@ void CacheManager::update_global_statistics()
     m_global_total_objects_cached.store(temp_global_total_objects_cached);
 }
 
+void CacheManager::check_is_instance_valid(int instance_id) const
+{
+    // Validate the instance ID
+    if (instance_id < 0 || instance_id >= m_cache_instances.size())
+    {
+        std::string error_string = "Invalid instance ID.";
+        LOG(ERROR) << error_string;
+
+        throw std::runtime_error(error_string);
+    }
+}
+
 InstanceStatistics CacheManager::get_instance_statistics(int instance_id)
 {
     return m_cache_instances[instance_id]->get_statistics();
@@ -278,7 +274,7 @@ CacheStatistics CacheManager::get_statistics()
 // CacheInstance Implementation
 bool CacheInstance::evict(const std::string& uuid)
 {
-    std::lock_guard<std::mutex> lock(m_instance_mutex);
+    std::scoped_lock<std::mutex> lock(m_instance_mutex);
 
     auto& index = m_cache.get<0>();
     auto it     = index.find(uuid);
@@ -332,7 +328,7 @@ bool CacheInstance::lru_evict()
 void CacheInstance::reset()
 {
     // Acquire lock to ensure no other operations interfere with the reset
-    std::lock_guard<std::mutex> lock(m_instance_mutex);
+    std::scoped_lock<std::mutex> lock(m_instance_mutex);
 
     // Clear the multi-index cache
     m_cache.clear();

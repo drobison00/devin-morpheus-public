@@ -54,7 +54,7 @@ TEST_F(CacheManagerTest, BasicStoreAndRetrieve)
 {
     int instance_id  = cacheManager.allocate_cache_instance();
     std::string uuid = "test_uuid";
-    auto shared_data = std::make_shared<uint8_t>(42);
+    auto shared_data = std::make_shared<uint8_t>(1);
     std::size_t size = sizeof(uint8_t);
 
     std::weak_ptr<uint8_t> weak_data      = cacheManager.store(instance_id, uuid, shared_data, size, false);
@@ -233,7 +233,7 @@ TEST_F(CacheManagerTest, CheckDirtyFlag)
     int instance_id = cacheManager.allocate_cache_instance();
 
     std::string uuid = "uuid_dirty";
-    auto shared_data = std::make_shared<uint8_t>(100);
+    auto shared_data = std::make_shared<uint8_t>(2);
     cacheManager.store(instance_id, uuid, shared_data, sizeof(uint8_t), true);
     cacheManager.get(instance_id, uuid);  // cache hit
 

@@ -216,9 +216,9 @@ class CacheManager
         m_cache_instance_in_use;  // Vector indicating which instances are in use
 
     // Configuration settings
-    std::size_t m_max_cached_objects;
-    std::size_t m_max_cached_bytes;
-    double m_memory_utilization_threshold;
+    std::atomic<double> m_memory_utilization_threshold;
+    std::atomic<std::size_t> m_max_cached_objects;
+    std::atomic<std::size_t> m_max_cached_bytes;
 
     // Global statistics
     std::size_t m_total_cached_bytes;
@@ -229,6 +229,7 @@ class CacheManager
     std::atomic<std::size_t> m_global_total_objects_cached{0};
 
     // Mutex for ensuring thread safety during global operations
+    mutable std::mutex m_cache_creation_mutex;
     mutable std::mutex m_global_mutex;
 
     /**
@@ -240,6 +241,7 @@ class CacheManager
     void lru_evict();
 
     void update_global_statistics();
+    void check_is_instance_valid(int instance_id) const;
 };
 
 /**

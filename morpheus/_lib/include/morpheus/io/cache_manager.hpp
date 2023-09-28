@@ -196,6 +196,7 @@ class CacheManager
 
     /**
      * Get aggregated statistics across all active cache instances.
+     * @note To avoid excessive locking, statistics are accumulated incrementally and may be slightly stale.
      *
      * @return CacheStatistics, aggregated stats of all instances
      */

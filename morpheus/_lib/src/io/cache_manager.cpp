@@ -132,7 +132,7 @@ std::weak_ptr<uint8_t> CacheManager::store(
     check_is_instance_valid(instance_id);
 
     // Check if cache limits would be exceeded, and evict if necessary
-    while (exceeds_limits(instance_id)) // TODO
+    while (exceeds_limits(instance_id))  // TODO
     {
         m_cache_instances[instance_id]->lru_evict();
     }
@@ -155,12 +155,12 @@ std::weak_ptr<uint8_t> CacheManager::store(
     }
 
     // Update statistics
-    m_cache_instances[instance_id]->m_total_objects_cached.fetch_add(1, std::memory_order_relaxed);
-    m_cache_instances[instance_id]->m_total_cached_bytes.fetch_add(size, std::memory_order_relaxed);
+    m_cache_instances[instance_id]->m_total_objects_cached.fetch_add(1);
+    m_cache_instances[instance_id]->m_total_cached_bytes.fetch_add(size);
 
     if (pin)
     {
-        m_cache_instances[instance_id]->m_pinned_memory_bytes.fetch_add(size, std::memory_order_relaxed);
+        m_cache_instances[instance_id]->m_pinned_memory_bytes.fetch_add(size);
     }
 
     return {data};
@@ -168,12 +168,7 @@ std::weak_ptr<uint8_t> CacheManager::store(
 
 bool CacheManager::evict(int instance_id, const std::string& uuid)
 {
-    // Validate the instance ID
-    if (instance_id < 0 || instance_id >= m_cache_instances.size())
-    {
-        LOG(ERROR) << "Invalid instance ID.";
-        return false;
-    }
+    check_is_instance_valid(instance_id);
 
     auto result = m_cache_instances[instance_id]->evict(uuid);
     m_dirty.store(true);
@@ -185,23 +180,23 @@ std::weak_ptr<uint8_t> CacheManager::get(int instance_id, const std::string& uui
 {
     // Acquire lock for the specific instance
     std::scoped_lock<std::mutex> lock(m_cache_instances[instance_id]->m_instance_mutex);
-    m_dirty.store(true);
 
     auto& cache_index = m_cache_instances[instance_id]->m_cache.get<0>();  // The hashed index
-    auto it           = cache_index.find(uuid);
+    std::weak_ptr<uint8_t> result{};
 
-    if (it != cache_index.end())
+    auto it = cache_index.find(uuid);
+    if (it != cache_index.end())  // Cache hit
     {
-        // Cache hit
         m_cache_instances[instance_id]->m_cache_hits.fetch_add(1, std::memory_order_relaxed);
-        return {it->data};
+        result = {it->data};
     }
-    else
+    else  // Cache miss
     {
-        // Cache miss
         m_cache_instances[instance_id]->m_cache_misses.fetch_add(1, std::memory_order_relaxed);
-        return {};
     }
+
+    m_dirty.store(true);
+    return result;
 }
 
 void CacheManager::update_global_statistics()

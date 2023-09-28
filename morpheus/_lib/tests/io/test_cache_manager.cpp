@@ -21,6 +21,9 @@
 
 #include <gtest/gtest.h>
 
+#include <thread>
+#include <vector>
+
 using namespace morpheus;
 using namespace morpheus::test;
 using namespace morpheus::io;
@@ -312,7 +315,7 @@ TEST_F(CacheManagerTest, ComplexCreateEvict)
 
     auto stats_1 = cacheManager.get_statistics();
     ASSERT_EQ(1, stats_1.cache_instances);
-    ASSERT_EQ(10, stats_1.total_objects_cached);
+    ASSERT_EQ(10, stats_1.total_cached_objects);
     ASSERT_EQ(10, stats_1.cache_hits);
     ASSERT_EQ(5 * sizeof(uint8_t), stats_1.pinned_memory_bytes);  // Only 5 pinned entries should be left
 
@@ -327,12 +330,215 @@ TEST_F(CacheManagerTest, ComplexCreateEvict)
     auto stats_2 = cacheManager.get_statistics();
     ASSERT_EQ(10, stats_2.cache_hits);
     ASSERT_EQ(1, stats_2.cache_instances);
-    ASSERT_EQ(5, stats_2.total_objects_cached);
+    ASSERT_EQ(5, stats_2.total_cached_objects);
 
     // 2, and 4 above will be pinned memory that is evicted, leaving 3 pinned objects
     ASSERT_EQ(3 * sizeof(uint8_t), stats_2.pinned_memory_bytes);  // Only 3 pinned entries should be left
 
     // Clean-up
+    cacheManager.free_cache_instance(instance_id);
+}
+
+TEST_F(CacheManagerTest, TestLRUEvictionWhenFull)
+{
+    int instance_id = cacheManager.allocate_cache_instance();
+
+    // Fill the cache to its limit
+    auto MAX_CACHE_SIZE = 10;
+    cacheManager.set_max_cached_bytes(MAX_CACHE_SIZE * 100);
+
+    for (int i = 0; i < MAX_CACHE_SIZE; ++i)
+    {  // Assume MAX_CACHE_SIZE is the limit
+        std::string uuid = "UUID_" + std::to_string(i);
+        std::shared_ptr<uint8_t> data(new uint8_t[100], std::default_delete<uint8_t[]>());
+        cacheManager.store(instance_id, uuid, data, 100, false);
+    }
+
+    // Insert an additional item; this should trigger eviction
+    std::string additional_uuid = "UUID_ADDITIONAL";
+    std::shared_ptr<uint8_t> additional_data(new uint8_t[100], std::default_delete<uint8_t[]>());
+    cacheManager.store(instance_id, additional_uuid, additional_data, 100, false);
+
+    // Verify that the first inserted item has been evicted
+    auto evicted_data = cacheManager.get(instance_id, "UUID_0");  // Assume `retrieve` is a function you have
+    EXPECT_EQ(evicted_data.lock(), nullptr);
+
+    // Verify that the additional item exists
+    auto added_data = cacheManager.get(instance_id, additional_uuid);
+    EXPECT_NE(added_data.lock(), nullptr);
+
+    cacheManager.free_cache_instance(instance_id);
+}
+
+TEST_F(CacheManagerTest, TestLRUEvictionWithPinnedItems)
+{
+    int instance_id = cacheManager.allocate_cache_instance();
+
+    // Fill the cache to its limit with pinned items
+    auto MAX_CACHE_SIZE = 10;
+    cacheManager.set_max_cached_bytes(MAX_CACHE_SIZE * 100);
+
+    for (int i = 0; i < MAX_CACHE_SIZE - 1; ++i)
+    {
+        std::string uuid = "UUID_PIN_" + std::to_string(i);
+        std::shared_ptr<uint8_t> data(new uint8_t[100], std::default_delete<uint8_t[]>());
+        cacheManager.store(instance_id, uuid, data, 100, true);  // Pinning the item
+    }
+
+    // Insert an additional unpinned item; this should NOT trigger eviction of pinned items
+    std::string additional_uuid = "UUID_ADDITIONAL";
+    std::shared_ptr<uint8_t> additional_data(new uint8_t[100], std::default_delete<uint8_t[]>());
+    cacheManager.store(instance_id, additional_uuid, additional_data, 100, false);
+
+    // Verify that the first inserted pinned item still exists
+    auto pinned_data = cacheManager.get(instance_id, "UUID_PIN_0");
+    EXPECT_NE(pinned_data.lock(), nullptr);
+
+    cacheManager.free_cache_instance(instance_id);
+}
+
+TEST_F(CacheManagerTest, TestLRUEvictionWhenHalfFull)
+{
+    int instance_id = cacheManager.allocate_cache_instance();
+
+    // Fill the cache to its half limit
+    auto MAX_CACHE_SIZE = 10;
+    cacheManager.set_max_cached_bytes(MAX_CACHE_SIZE * 100);
+
+    for (int i = 0; i < MAX_CACHE_SIZE / 2; ++i)
+    {
+        std::string uuid = "UUID_" + std::to_string(i);
+        std::shared_ptr<uint8_t> data(new uint8_t[100], std::default_delete<uint8_t[]>());
+        cacheManager.store(instance_id, uuid, data, 100, false);
+    }
+
+    // Insert an additional item; this should NOT trigger eviction
+    std::string additional_uuid = "UUID_ADDITIONAL";
+    std::shared_ptr<uint8_t> additional_data(new uint8_t[100], std::default_delete<uint8_t[]>());
+    cacheManager.store(instance_id, additional_uuid, additional_data, 100, false);
+
+    // Verify that the first inserted item still exists
+    auto initial_data = cacheManager.get(instance_id, "UUID_0");
+    EXPECT_NE(initial_data.lock(), nullptr);
+
+    cacheManager.free_cache_instance(instance_id);
+}
+
+TEST_F(CacheManagerTest, TestLRUEvictionByMaxBytesAndMaxObjects)
+{
+    int instance_id = cacheManager.allocate_cache_instance();
+
+    // Set maximum limits for cache
+    auto MAX_CACHE_SIZE  = 10;   // maximum objects
+    auto MAX_CACHE_BYTES = 900;  // maximum bytes
+    cacheManager.set_max_cached_bytes(MAX_CACHE_BYTES);
+    cacheManager.set_max_cached_objects(MAX_CACHE_SIZE);
+
+    // Fill the cache to its limit
+    for (int i = 0; i < MAX_CACHE_SIZE; ++i)
+    {
+        std::string uuid = "UUID_" + std::to_string(i);
+        std::shared_ptr<uint8_t> data(new uint8_t[100], std::default_delete<uint8_t[]>());
+        cacheManager.store(instance_id, uuid, data, 100, false);
+    }
+
+    // Insert an additional item; this should trigger eviction
+    std::string additional_uuid = "UUID_ADDITIONAL";
+    std::shared_ptr<uint8_t> additional_data(new uint8_t[50], std::default_delete<uint8_t[]>());
+    cacheManager.store(instance_id, additional_uuid, additional_data, 50, false);
+
+    // Verify that the first inserted item has been evicted
+    auto evicted_data = cacheManager.get(instance_id, "UUID_0");
+    EXPECT_EQ(evicted_data.lock(), nullptr);
+    cacheManager.free_cache_instance(instance_id);
+}
+
+TEST_F(CacheManagerTest, TestLRUEvictionByMaxBytesWhenMaxObjectsUnset)
+{
+    int instance_id = cacheManager.allocate_cache_instance();
+
+    // Set maximum limit for bytes only
+    auto MAX_CACHE_BYTES = 900;  // maximum bytes
+    cacheManager.set_max_cached_bytes(MAX_CACHE_BYTES);
+
+    // Fill the cache to nearly its byte limit
+    for (int i = 0; i < 9; ++i)  // 900 bytes, 9 objects
+    {
+        std::string uuid = "UUID_" + std::to_string(i);
+        std::shared_ptr<uint8_t> data(new uint8_t[100], std::default_delete<uint8_t[]>());
+        cacheManager.store(instance_id, uuid, data, 100, false);
+    }
+
+    // Insert an additional item; this should trigger eviction by bytes
+    std::string additional_uuid = "UUID_ADDITIONAL";
+    std::shared_ptr<uint8_t> additional_data(new uint8_t[50], std::default_delete<uint8_t[]>());
+    cacheManager.store(instance_id, additional_uuid, additional_data, 50, false);
+
+    // Verify that the first inserted item has been evicted
+    auto evicted_data = cacheManager.get(instance_id, "UUID_0");
+    EXPECT_EQ(evicted_data.lock(), nullptr);
+    cacheManager.free_cache_instance(instance_id);
+}
+
+TEST_F(CacheManagerTest, TestConcurrentStoreAndGet)
+{
+    int instance_id           = cacheManager.allocate_cache_instance();
+    constexpr int NUM_THREADS = 100;
+    std::vector<std::thread> threads;
+
+    auto worker = [&](int idx) {
+        std::string uuid = "UUID_" + std::to_string(idx);
+        std::shared_ptr<uint8_t> data(new uint8_t[100], std::default_delete<uint8_t[]>());
+        cacheManager.store(instance_id, uuid, data, 100, false);
+        auto retrieved_data = cacheManager.get(instance_id, uuid);
+        EXPECT_EQ(retrieved_data.lock(), data);
+    };
+
+    for (int i = 0; i < NUM_THREADS; ++i)
+    {
+        threads.push_back(std::thread(worker, i));
+    }
+
+    for (auto& t : threads)
+    {
+        t.join();
+    }
+
+    cacheManager.free_cache_instance(instance_id);
+}
+
+TEST_F(CacheManagerTest, TestConcurrentStoreWithLRUEviction)
+{
+    constexpr int NumThreads  = 1000;
+    constexpr int PayloadSize = 100;
+    int instance_id           = cacheManager.allocate_cache_instance();
+    cacheManager.set_max_cached_bytes((NumThreads / 2) * PayloadSize);
+    cacheManager.set_max_cached_objects(NumThreads / 2);
+
+    std::vector<std::thread> threads;
+
+    auto worker = [&](int idx) {
+        std::string uuid = "UUID_" + std::to_string(idx);
+        std::shared_ptr<uint8_t> data(new uint8_t[100], std::default_delete<uint8_t[]>());
+        cacheManager.store(instance_id, uuid, data, 100, false);
+    };
+
+    for (int i = 0; i < NumThreads; ++i)
+    {
+        threads.push_back(std::thread(worker, i));
+    }
+
+    for (auto& t : threads)
+    {
+        t.join();
+    }
+
+    auto stats = cacheManager.get_statistics();
+    // Validate that the total cached bytes do not exceed the limit
+    EXPECT_LE(stats.total_cached_bytes, (NumThreads / 2) * PayloadSize);
+
+    // Validate that the total cached objects do not exceed the limit
+    EXPECT_LE(stats.total_cached_objects, NumThreads / 2);
     cacheManager.free_cache_instance(instance_id);
 }
 

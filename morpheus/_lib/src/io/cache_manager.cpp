@@ -18,6 +18,7 @@
 #include "morpheus/io/cache_manager.hpp"
 
 #include <glog/logging.h>
+#include <sys/sysinfo.h>
 
 #include <memory>
 #include <mutex>
@@ -25,6 +26,20 @@
 #include <unordered_map>
 
 using namespace boost::multi_index;
+
+namespace {
+double get_system_memory_utilization()
+{
+    struct sysinfo info;
+    if (sysinfo(&info) == 0)
+    {
+        std::size_t total_memory = info.totalram * info.mem_unit;
+        std::size_t free_memory  = info.freeram * info.mem_unit;
+        return 100.0 * (1.0 - static_cast<double>(free_memory) / static_cast<double>(total_memory));
+    }
+    return -1.0;  // Return -1 to indicate an error in fetching the information.
+}
+}  // namespace
 
 namespace morpheus::io {
 
@@ -74,7 +89,7 @@ double CacheManager::get_memory_utilization_threshold() const
 
 int CacheManager::allocate_cache_instance()
 {
-    std::scoped_lock<std::mutex> lock(m_cache_creation_mutex);
+    std::scoped_lock<std::recursive_mutex> lock(m_cache_creation_mutex);
 
     int instance_id = -1;
 
@@ -126,15 +141,45 @@ bool exceeds_limits(std::size_t iid)
     return false;
 }
 
+bool CacheManager::caching_threshold_exceeded(std::size_t new_object_size)
+{
+    auto aggregated_stats       = get_statistics();
+    std::size_t current_objects = aggregated_stats.total_cached_objects;
+    std::size_t current_bytes   = aggregated_stats.total_cached_bytes;
+
+    // Check against set limits
+    if (m_max_cached_objects > 0 && (current_objects + 1 > m_max_cached_objects))
+        return true;
+
+    if (m_max_cached_bytes > 0 && (current_bytes + new_object_size > m_max_cached_bytes))
+        return true;
+
+    // Check against system memory
+    if (get_system_memory_utilization() < m_memory_utilization_threshold.load())
+        return true;
+
+    return false;
+}
+
 std::weak_ptr<uint8_t> CacheManager::store(
     int instance_id, const std::string& uuid, std::shared_ptr<uint8_t> data, std::size_t size, bool pin)
 {
     check_is_instance_valid(instance_id);
 
     // Check if cache limits would be exceeded, and evict if necessary
-    while (exceeds_limits(instance_id))  // TODO
+    while (caching_threshold_exceeded(size))
     {
-        m_cache_instances[instance_id]->lru_evict();
+        auto eviction_result = m_cache_instances[instance_id]->lru_evict();
+
+        if (!eviction_result)
+        {
+            // TODO(Devin) this shouldn't be an error, we should try to evict from other instances
+            std::string error_string = "Failed to evict cache object.";
+            LOG(ERROR) << error_string;
+
+            throw std::runtime_error(error_string);
+        }
+        m_dirty.store(true);
     }
 
     // Create and insert new CacheData
@@ -142,8 +187,8 @@ std::weak_ptr<uint8_t> CacheManager::store(
 
     // Scoped block
     {
-        std::scoped_lock<std::mutex> lock(m_cache_instances[instance_id]->m_instance_mutex);
-        auto insert_result = m_cache_instances[instance_id]->m_cache.insert(cache_data);
+        std::scoped_lock<std::recursive_mutex> lock(m_cache_instances[instance_id]->m_cache_mutex);
+        auto insert_result = m_cache_instances[instance_id]->m_cache.insert(std::move(cache_data));
 
         if (!insert_result.second)
         {
@@ -162,6 +207,7 @@ std::weak_ptr<uint8_t> CacheManager::store(
     {
         m_cache_instances[instance_id]->m_pinned_memory_bytes.fetch_add(size);
     }
+    m_dirty.store(true);
 
     return {data};
 }
@@ -170,8 +216,12 @@ bool CacheManager::evict(int instance_id, const std::string& uuid)
 {
     check_is_instance_valid(instance_id);
 
-    auto result = m_cache_instances[instance_id]->evict(uuid);
-    m_dirty.store(true);
+    bool result = false;
+    {
+        std::scoped_lock<std::recursive_mutex> lock(m_cache_instances[instance_id]->m_cache_mutex);
+        result = m_cache_instances[instance_id]->evict(uuid);
+        m_dirty.store(true);
+    }
 
     return result;
 }
@@ -179,23 +229,24 @@ bool CacheManager::evict(int instance_id, const std::string& uuid)
 std::weak_ptr<uint8_t> CacheManager::get(int instance_id, const std::string& uuid)
 {
     // Acquire lock for the specific instance
-    std::scoped_lock<std::mutex> lock(m_cache_instances[instance_id]->m_instance_mutex);
+    std::scoped_lock<std::recursive_mutex> lock(m_cache_instances[instance_id]->m_cache_mutex);
+    std::weak_ptr<uint8_t> result{};
 
     auto& cache_index = m_cache_instances[instance_id]->m_cache.get<0>();  // The hashed index
-    std::weak_ptr<uint8_t> result{};
 
     auto it = cache_index.find(uuid);
     if (it != cache_index.end())  // Cache hit
     {
-        m_cache_instances[instance_id]->m_cache_hits.fetch_add(1, std::memory_order_relaxed);
+        m_cache_instances[instance_id]->m_cache_hits.fetch_add(1);
         result = {it->data};
     }
     else  // Cache miss
     {
-        m_cache_instances[instance_id]->m_cache_misses.fetch_add(1, std::memory_order_relaxed);
+        m_cache_instances[instance_id]->m_cache_misses.fetch_add(1);
     }
 
     m_dirty.store(true);
+
     return result;
 }
 
@@ -206,8 +257,11 @@ void CacheManager::update_global_statistics()
     std::size_t temp_global_cache_hits           = 0;
     std::size_t temp_global_cache_misses         = 0;
     std::size_t temp_global_pinned_memory_bytes  = 0;
+    std::size_t temp_global_total_cached_bytes   = 0;
     std::size_t temp_global_total_objects_cached = 0;
 
+    // Iterate over all cache instances and aggregate statistics, this is not intended to be fully consistent, so the
+    // statistics will be roughly accurate, but not exact.
     for (std::size_t i = 0; i < m_cache_instances.size(); ++i)
     {
         if (!m_cache_instance_in_use[i]->load())
@@ -220,19 +274,27 @@ void CacheManager::update_global_statistics()
         temp_global_cache_hits += stats.cache_hits;
         temp_global_cache_misses += stats.cache_misses;
         temp_global_pinned_memory_bytes += stats.pinned_memory_bytes;
-        temp_global_total_objects_cached += stats.total_objects_cached;
+        temp_global_total_cached_bytes += stats.total_cached_bytes;
+        temp_global_total_objects_cached += stats.total_cached_objects;
     }
 
-    // Update the global stats
-    m_global_cache_instances.store(temp_global_cache_instances);
-    m_global_cache_hits.store(temp_global_cache_hits);
-    m_global_cache_misses.store(temp_global_cache_misses);
-    m_global_pinned_memory_bytes.store(temp_global_pinned_memory_bytes);
-    m_global_total_objects_cached.store(temp_global_total_objects_cached);
+    {
+        // Update the global stats
+        m_global_cache_instances.store(temp_global_cache_instances);
+        m_global_cache_hits.store(temp_global_cache_hits);
+        m_global_cache_misses.store(temp_global_cache_misses);
+        m_global_pinned_memory_bytes.store(temp_global_pinned_memory_bytes);
+        m_global_cached_bytes.store(temp_global_total_cached_bytes);
+        m_global_total_objects_cached.store(temp_global_total_objects_cached);
+
+        m_dirty.store(false);
+    }
 }
 
 void CacheManager::check_is_instance_valid(int instance_id) const
 {
+    std::scoped_lock<std::recursive_mutex> lock(m_cache_creation_mutex);
+
     // Validate the instance ID
     if (instance_id < 0 || instance_id >= m_cache_instances.size())
     {
@@ -253,23 +315,29 @@ InstanceStatistics CacheManager::get_instance_statistics(int instance_id)
 // discussion.
 CacheStatistics CacheManager::get_statistics()
 {
-    if (m_dirty.load())
+    // Use a double-checked locking pattern here to avoid refreshing already stale statistics
+    if (m_dirty.load(std::memory_order_acquire))
     {
-        update_global_statistics();
-        m_dirty.store(false);
+        std::scoped_lock<std::mutex> lock(m_statistics_mutex);
+        if (m_dirty.load(std::memory_order_relaxed))
+        {
+            update_global_statistics();
+            m_dirty.store(false, std::memory_order_release);
+        }
     }
 
     return {m_global_cache_instances.load(),
             m_global_cache_hits.load(),
             m_global_cache_misses.load(),
             m_global_pinned_memory_bytes.load(),
+            m_global_cached_bytes.load(),
             m_global_total_objects_cached.load()};
 }
 
 // CacheInstance Implementation
 bool CacheInstance::evict(const std::string& uuid)
 {
-    std::scoped_lock<std::mutex> lock(m_instance_mutex);
+    std::scoped_lock<std::recursive_mutex> lock(m_cache_mutex);
 
     auto& index = m_cache.get<0>();
     auto it     = index.find(uuid);
@@ -296,34 +364,27 @@ bool CacheInstance::evict(const std::string& uuid)
 
 bool CacheInstance::lru_evict()
 {
-    auto& index = m_cache.get<1>();  // The ordered index
-    auto it     = index.begin();     // The least recently accessed item
+    std::lock_guard<std::recursive_mutex> lock(m_cache_mutex);  // Locking the mutex for thread-safety
 
-    if (it != index.end())
+    // We will look in the second index, which is ordered by last_access time
+    auto& time_index = m_cache.get<1>();
+
+    for (const auto& it : time_index)
     {
-        if (!it->pinned)
-        {
-            std::size_t size = it->size;
-            index.erase(it);
-
-            // Update statistics
-            m_total_objects_cached.fetch_sub(1, std::memory_order_relaxed);
-            m_total_cached_bytes.fetch_sub(size, std::memory_order_relaxed);
-
-            return true;
-        }
-        else
-        {
-            LOG(WARNING) << "Attempt to evict pinned item.";
+        if (!it.pinned)
+        {  // If the item is not pinned, it can be evicted
+            return evict(it.uuid);
         }
     }
+
+    // If we reach here, it means we didn't find any item to evict
     return false;
 }
 
 void CacheInstance::reset()
 {
     // Acquire lock to ensure no other operations interfere with the reset
-    std::scoped_lock<std::mutex> lock(m_instance_mutex);
+    std::scoped_lock<std::recursive_mutex> lock(m_cache_mutex);
 
     // Clear the multi-index cache
     m_cache.clear();
@@ -338,7 +399,11 @@ void CacheInstance::reset()
 
 InstanceStatistics CacheInstance::get_statistics() const
 {
-    return {m_cache_hits.load(), m_cache_misses.load(), m_pinned_memory_bytes.load(), m_total_objects_cached.load()};
+    return {m_cache_hits.load(),
+            m_cache_misses.load(),
+            m_pinned_memory_bytes.load(),
+            m_total_cached_bytes.load(),
+            m_total_objects_cached.load()};
 }
 
 // CacheManagerInterface Implementation

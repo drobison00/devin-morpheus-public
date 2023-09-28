@@ -36,7 +36,9 @@ struct InstanceStatistics
     std::size_t cache_hits;
     std::size_t cache_misses;
     std::size_t pinned_memory_bytes;
-    std::size_t total_objects_cached;
+    std::size_t total_cached_bytes;
+    std::size_t total_cached_objects;
+    std::size_t cache_evictions;
 };
 
 struct CacheStatistics
@@ -45,48 +47,12 @@ struct CacheStatistics
     std::size_t cache_hits;
     std::size_t cache_misses;
     std::size_t pinned_memory_bytes;
-    std::size_t total_objects_cached;
+    std::size_t total_cached_bytes;
+    std::size_t total_cached_objects;
+    std::size_t cache_evictions;
 };
 
-class CacheInstance
-{
-  public:
-    struct CacheData
-    {
-        std::string uuid;  // Unique identifier
-        bool pinned;
-
-        std::shared_ptr<uint8_t> data;
-        std::size_t size;
-        std::chrono::time_point<std::chrono::high_resolution_clock> last_access;
-    };
-
-    using cache_container_t = boost::multi_index_container<
-        CacheData,
-        boost::multi_index::indexed_by<
-            boost::multi_index::hashed_unique<boost::multi_index::member<CacheData, std::string, &CacheData::uuid>>,
-            boost::multi_index::ordered_non_unique<
-                boost::multi_index::member<CacheData,
-                                           std::chrono::time_point<std::chrono::high_resolution_clock>,
-                                           &CacheData::last_access>>>>;
-
-    std::mutex m_instance_mutex;
-    cache_container_t m_cache;
-
-    // Statistics for this CacheInstance
-    std::atomic<std::size_t> m_cache_hits{0};
-    std::atomic<std::size_t> m_cache_misses{0};
-    std::atomic<std::size_t> m_total_cached_bytes{0};
-    std::atomic<std::size_t> m_pinned_memory_bytes{0};
-    std::atomic<std::size_t> m_total_objects_cached{0};
-
-    // Assuming InstanceStatistics is a type you've defined
-    InstanceStatistics get_statistics() const;
-
-    bool lru_evict();
-    bool evict(const std::string& uuid);
-    void reset();
-};
+class CacheInstance;
 
 /**
  * @brief CacheManager class is responsible for managing all caching operations and policies.
@@ -202,8 +168,34 @@ class CacheManager
      */
     CacheStatistics get_statistics();
 
+    // Method to check if the cache has exceeded its limits
+
+    // Returns true if any of the limitations (e.g., max_objects, max_bytes, system_memory_threshold) are exceeded
+    // Otherwise, returns false.
+    bool caching_threshold_exceeded(std::size_t incoming_object_size);
+
     // Methods to manage CacheInstance allocation
+    // Allocate a new CacheInstance and return its unique instance ID.
+    // This function dynamically creates a CacheInstance, assigns a unique instance ID to it,
+    // and saves it in a pool of cache instances for future retrieval.
+    //
+    // Returns:
+    //   - A unique identifier (instance ID) for the newly allocated CacheInstance.
+    //   - A negative value if allocation fails, for example, due to resource limits.
     int allocate_cache_instance();
+
+    // Free an existing CacheInstance given its unique instance ID.
+    // This function marks the CacheInstance as no longer in use, effectively releasing its resources,
+    // and removes it from the pool of active cache instances. It may also reset the CacheInstance's
+    // internal state, such as stored cache items and statistics, depending on implementation.
+    //
+    // Parameters:
+    //   - instance_id: The unique identifier of the CacheInstance to be freed.
+    //
+    // Returns:
+    //   - No return value.
+    //   - May log an error or throw an exception if the instance ID is invalid or the CacheInstance
+    //     could not be freed.
     void free_cache_instance(int instance_id);
 
   private:
@@ -227,10 +219,12 @@ class CacheManager
     std::atomic<std::size_t> m_global_cache_hits{0};
     std::atomic<std::size_t> m_global_cache_misses{0};
     std::atomic<std::size_t> m_global_pinned_memory_bytes{0};
+    std::atomic<std::size_t> m_global_cached_bytes{0};
     std::atomic<std::size_t> m_global_total_objects_cached{0};
 
     // Mutex for ensuring thread safety during global operations
-    mutable std::mutex m_cache_creation_mutex;
+    mutable std::recursive_mutex m_cache_creation_mutex;
+    mutable std::mutex m_statistics_mutex;
     mutable std::mutex m_global_mutex;
 
     /**
@@ -243,6 +237,46 @@ class CacheManager
 
     void update_global_statistics();
     void check_is_instance_valid(int instance_id) const;
+};
+
+class CacheInstance
+{
+  public:
+    struct CacheData
+    {
+        std::string uuid;  // Unique identifier
+        bool pinned;
+
+        std::shared_ptr<uint8_t> data;
+        std::size_t size;
+        std::chrono::time_point<std::chrono::high_resolution_clock> last_access;
+    };
+
+    using cache_container_t = boost::multi_index_container<
+        CacheData,
+        boost::multi_index::indexed_by<
+            boost::multi_index::hashed_unique<boost::multi_index::member<CacheData, std::string, &CacheData::uuid>>,
+            boost::multi_index::ordered_non_unique<
+                boost::multi_index::member<CacheData,
+                                           std::chrono::time_point<std::chrono::high_resolution_clock>,
+                                           &CacheData::last_access>>>>;
+
+    std::recursive_mutex m_cache_mutex;
+    cache_container_t m_cache;
+
+    // Statistics for this CacheInstance
+    std::atomic<std::size_t> m_cache_hits{0};
+    std::atomic<std::size_t> m_cache_misses{0};
+    std::atomic<std::size_t> m_total_cached_bytes{0};
+    std::atomic<std::size_t> m_pinned_memory_bytes{0};
+    std::atomic<std::size_t> m_total_objects_cached{0};
+
+    // Assuming InstanceStatistics is a type you've defined
+    InstanceStatistics get_statistics() const;
+
+    bool lru_evict();
+    bool evict(const std::string& uuid);
+    void reset();
 };
 
 /**

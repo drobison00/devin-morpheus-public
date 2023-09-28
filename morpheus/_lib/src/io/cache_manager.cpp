@@ -23,7 +23,8 @@
 #include <mutex>
 #include <string>
 #include <unordered_map>
-#include <vector>
+
+using namespace boost::multi_index;
 
 namespace morpheus::io {
 
@@ -77,7 +78,6 @@ double CacheManager::get_memory_utilization_threshold() const
 int CacheManager::allocate_cache_instance()
 {
     std::lock_guard<std::mutex> lock(m_global_mutex);  // Lock to ensure thread-safety
-    m_dirty.store(true);
 
     // Search for an available cache instance slot
     for (std::size_t i = 0; i < m_cache_instance_in_use.size(); ++i)
@@ -97,6 +97,7 @@ int CacheManager::allocate_cache_instance()
     // Mark the new instance as in use
     auto new_instance_index = std::make_unique<std::atomic<bool>>(true);
     m_cache_instance_in_use.push_back(std::move(new_instance_index));
+    m_global_cache_instances += 1;
 
     // Return the index of the new instance
     return static_cast<int>(m_cache_instances.size() - 1);
@@ -113,77 +114,60 @@ void CacheManager::free_cache_instance(int instance_id)
         return;
     }
 
-    // Lock the instance to safely reset its state
-    std::lock_guard<std::mutex> instance_lock(m_cache_instances[instance_id]->m_instance_mutex);
-
     // Reset instance properties and statistics
     m_cache_instances[instance_id]->reset();
 
     // Mark the instance as no longer in use
     m_cache_instance_in_use[instance_id]->store(false);
-
+    m_global_cache_instances -= 1;
     m_dirty.store(true);
 }
 
-void CacheManager::lru_evict()
-{
-    std::lock_guard<std::mutex> lock(m_global_mutex);
-
-    for (auto& cache_instance : m_cache_instances)
-    {
-        std::lock_guard<std::mutex> instance_lock(cache_instance->m_instance_mutex);
-
-        if (cache_instance->m_cache.empty())
-        {
-            continue;
-        }
-
-        // Find the least recently used item
-        auto lru_it = std::min_element(
-            cache_instance->m_cache.begin(), cache_instance->m_cache.end(), [](const auto& a, const auto& b) {
-                return a.second.last_access < b.second.last_access;
-            });
-
-        // Perform eviction
-        if (lru_it != cache_instance->m_cache.end())
-        {
-            auto lru_key             = lru_it->first;
-            std::size_t evicted_size = lru_it->second.data.use_count() == 1 ? lru_it->second.size : 0;  // TODO size
-
-            // Remove the item from the cache
-            cache_instance->m_cache.erase(lru_key);
-
-            // Update the total cached bytes
-            m_total_cached_bytes -= evicted_size;
-        }
-    }
-
-    m_dirty.store(true);
+void CacheManager::lru_evict() {}
+bool exceeds_limits(std::size_t iid)
+{  // TODO(Devin)
+    return false;
 }
 
 std::weak_ptr<uint8_t> CacheManager::store(
     int instance_id, const std::string& uuid, std::shared_ptr<uint8_t> data, std::size_t size, bool pin)
 {
-    std::lock_guard<std::mutex> lock(m_cache_instances[instance_id]->m_instance_mutex);
-    m_dirty.store(true);
+    // Validate the instance ID
+    if (instance_id < 0 || instance_id >= m_cache_instances.size())
+    {
+        std::string error_string = "Invalid instance ID.";
+        LOG(ERROR) << error_string;
 
-    // Update or insert data into cache
-    // Create a CacheData object
-    CacheManager::CacheInstance::CacheData cache_data;
-    cache_data.data        = data;
-    cache_data.size        = size;
-    cache_data.pinned      = pin;
-    cache_data.last_access = std::chrono::high_resolution_clock::now();
+        throw std::runtime_error(error_string);
+    }
 
-    m_cache_instances[instance_id]->m_cache[uuid] = cache_data;
+    // Check if cache limits would be exceeded, and evict if necessary
+    while (exceeds_limits(instance_id))
+    {
+        m_cache_instances[instance_id]->lru_evict();
+    }
+
+    // Create and insert new CacheData
+    CacheInstance::CacheData cache_data = {uuid, pin, data, size, std::chrono::high_resolution_clock::now()};
+    {
+        auto insert_result = m_cache_instances[instance_id]->m_cache.insert(cache_data);
+
+        if (!insert_result.second)
+        {
+            std::string error_string = "Data insertion failed. UUID might already exist.";
+            LOG(ERROR) << error_string;
+
+            throw std::runtime_error(error_string);
+        }
+    }
 
     // Update statistics
-    m_cache_instances[instance_id]->m_total_objects_cached++;
+    m_cache_instances[instance_id]->m_total_objects_cached.fetch_add(1, std::memory_order_relaxed);
+    m_cache_instances[instance_id]->m_total_cached_bytes.fetch_add(size, std::memory_order_relaxed);
 
-    // Handle pinned memory if 'pin' is true
     if (pin)
     {
-        m_cache_instances[instance_id]->m_pinned_memory_bytes += size;
+        m_cache_instances[instance_id]->m_pinned_memory_bytes.fetch_add(size, std::memory_order_relaxed);
     }
 
     return {data};
@@ -191,29 +175,47 @@ std::weak_ptr<uint8_t> CacheManager::store(
 
 bool CacheManager::evict(int instance_id, const std::string& uuid)
 {
-    std::lock_guard<std::mutex> instance_lock(m_cache_instances[instance_id]->m_instance_mutex);
+    // Validate the instance ID
+    if (instance_id < 0 || instance_id >= m_cache_instances.size())
+    {
+        LOG(ERROR) << "Invalid instance ID.";
+        return false;
+    }
+
+    auto result = m_cache_instances[instance_id]->evict(uuid);
     m_dirty.store(true);
 
-    return m_cache_instances[instance_id]->evict(uuid);
+    return result;
 }
 
 std::weak_ptr<uint8_t> CacheManager::get(int instance_id, const std::string& uuid)
 {
+    // Validate the instance ID
+    if (instance_id < 0 || instance_id >= m_cache_instances.size())
+    {
+        std::string error_string = "Invalid instance ID.";
+        LOG(ERROR) << error_string;
+
+        throw std::runtime_error(error_string);
+    }
+
+    // Acquire lock for the specific instance
     std::lock_guard<std::mutex> lock(m_cache_instances[instance_id]->m_instance_mutex);
     m_dirty.store(true);
 
-    auto it = m_cache_instances[instance_id]->m_cache.find(uuid);
-    if (it != m_cache_instances[instance_id]->m_cache.end())
+    auto& cache_index = m_cache_instances[instance_id]->m_cache.get<0>();  // The hashed index
+    auto it           = cache_index.find(uuid);
+
+    if (it != cache_index.end())
     {
         // Cache hit
-        it->second.last_access = std::chrono::high_resolution_clock::now();
-        m_cache_instances[instance_id]->m_cache_hits++;
-
-        return {it->second.data};
+        m_cache_instances[instance_id]->m_cache_hits.fetch_add(1, std::memory_order_relaxed);
+        return {it->data};
     }
     else
     {
-        m_cache_instances[instance_id]->m_cache_misses++;
+        // Cache miss
+        m_cache_instances[instance_id]->m_cache_misses.fetch_add(1, std::memory_order_relaxed);
         return {};
     }
 }
@@ -274,28 +276,78 @@ CacheStatistics CacheManager::get_statistics()
 }
 
 // CacheInstance Implementation
-InstanceStatistics CacheManager::CacheInstance::get_statistics() const
+bool CacheInstance::evict(const std::string& uuid)
 {
-    return {m_cache_hits.load(), m_cache_misses.load(), m_pinned_memory_bytes.load(), m_total_objects_cached.load()};
+    std::lock_guard<std::mutex> lock(m_instance_mutex);
+
+    auto& index = m_cache.get<0>();
+    auto it     = index.find(uuid);
+
+    if (it != index.end())
+    {
+        std::size_t size = it->size;
+
+        m_total_objects_cached.fetch_sub(1);
+        m_total_cached_bytes.fetch_sub(size);
+
+        if (it->pinned)
+        {
+            m_pinned_memory_bytes.fetch_sub(size);
+        }
+
+        index.erase(it);
+
+        return true;
+    }
+
+    return false;
 }
 
-bool CacheManager::CacheInstance::evict(const std::string& uuid)
+bool CacheInstance::lru_evict()
 {
-    auto it = m_cache.find(uuid);
-    if (it == m_cache.end())
-    {
-        return false;
-    }
+    auto& index = m_cache.get<1>();  // The ordered index
+    auto it     = index.begin();     // The least recently accessed item
 
-    m_total_objects_cached--;
-    m_total_cached_bytes -= it->second.size;
-    if (it->second.pinned)
+    if (it != index.end())
     {
-        m_pinned_memory_bytes -= it->second.size;
-    }
-    m_cache.erase(it);
+        if (!it->pinned)
+        {
+            std::size_t size = it->size;
+            index.erase(it);
 
-    return true;
+            // Update statistics
+            m_total_objects_cached.fetch_sub(1, std::memory_order_relaxed);
+            m_total_cached_bytes.fetch_sub(size, std::memory_order_relaxed);
+
+            return true;
+        }
+        else
+        {
+            LOG(WARNING) << "Attempt to evict pinned item.";
+        }
+    }
+    return false;
+}
+
+void CacheInstance::reset()
+{
+    // Acquire lock to ensure no other operations interfere with the reset
+    std::lock_guard<std::mutex> lock(m_instance_mutex);
+
+    // Clear the multi-index cache
+    m_cache.clear();
+
+    // Reset statistics
+    m_cache_hits.store(0, std::memory_order_relaxed);
+    m_cache_misses.store(0, std::memory_order_relaxed);
+    m_total_cached_bytes.store(0, std::memory_order_relaxed);
+    m_pinned_memory_bytes.store(0, std::memory_order_relaxed);
+    m_total_objects_cached.store(0, std::memory_order_relaxed);
+}
+
+InstanceStatistics CacheInstance::get_statistics() const
+{
+    return {m_cache_hits.load(), m_cache_misses.load(), m_pinned_memory_bytes.load(), m_total_objects_cached.load()};
 }
 
 // CacheManagerInterface Implementation

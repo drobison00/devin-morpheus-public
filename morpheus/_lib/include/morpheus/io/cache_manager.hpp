@@ -17,6 +17,11 @@
 
 #pragma once
 
+#include <boost/multi_index/hashed_index.hpp>
+#include <boost/multi_index/member.hpp>
+#include <boost/multi_index/ordered_index.hpp>
+#include <boost/multi_index_container.hpp>
+
 #include <atomic>
 #include <memory>
 #include <mutex>
@@ -41,6 +46,46 @@ struct CacheStatistics
     std::size_t cache_misses;
     std::size_t pinned_memory_bytes;
     std::size_t total_objects_cached;
+};
+
+class CacheInstance
+{
+  public:
+    struct CacheData
+    {
+        std::string uuid;  // Unique identifier
+        bool pinned;
+
+        std::shared_ptr<uint8_t> data;
+        std::size_t size;
+        std::chrono::time_point<std::chrono::high_resolution_clock> last_access;
+    };
+
+    using cache_container_t = boost::multi_index_container<
+        CacheData,
+        boost::multi_index::indexed_by<
+            boost::multi_index::hashed_unique<boost::multi_index::member<CacheData, std::string, &CacheData::uuid>>,
+            boost::multi_index::ordered_non_unique<
+                boost::multi_index::member<CacheData,
+                                           std::chrono::time_point<std::chrono::high_resolution_clock>,
+                                           &CacheData::last_access>>>>;
+
+    std::mutex m_instance_mutex;
+    cache_container_t m_cache;
+
+    // Statistics for this CacheInstance
+    std::atomic<std::size_t> m_cache_hits{0};
+    std::atomic<std::size_t> m_cache_misses{0};
+    std::atomic<std::size_t> m_total_cached_bytes{0};
+    std::atomic<std::size_t> m_pinned_memory_bytes{0};
+    std::atomic<std::size_t> m_total_objects_cached{0};
+
+    // Assuming InstanceStatistics is a type you've defined
+    InstanceStatistics get_statistics() const;
+
+    bool lru_evict();
+    bool evict(const std::string& uuid);
+    void reset();
 };
 
 /**
@@ -165,46 +210,6 @@ class CacheManager
      * @brief Private constructor to enforce the Singleton pattern.
      */
     CacheManager();
-
-    /**
-     * @brief Internal struct representing a cache instance.
-     *
-     * This struct holds the actual cache as an unordered_map.
-     */
-    struct CacheInstance
-    {
-        struct CacheData
-        {
-            bool pinned;
-
-            std::shared_ptr<uint8_t> data;
-            std::size_t size;
-            std::chrono::time_point<std::chrono::high_resolution_clock> last_access;
-        };
-
-        std::mutex m_instance_mutex;
-        std::unordered_map<std::string, CacheData> m_cache;
-
-        // Statistics for this CacheInstance
-        std::atomic<std::size_t> m_cache_hits{0};
-        std::atomic<std::size_t> m_cache_misses{0};
-        std::atomic<std::size_t> m_total_cached_bytes{0};
-        std::atomic<std::size_t> m_pinned_memory_bytes{0};
-        std::atomic<std::size_t> m_total_objects_cached{0};
-
-        InstanceStatistics get_statistics() const;
-
-        bool evict(const std::string& uuid);
-
-        void reset()
-        {
-            m_cache.clear();  // Clear the cache
-            m_cache_hits           = 0;
-            m_cache_misses         = 0;
-            m_pinned_memory_bytes  = 0;
-            m_total_objects_cached = 0;
-        }
-    };
 
     std::vector<std::unique_ptr<CacheInstance>> m_cache_instances;  // Vector holding all cache instances
     std::vector<std::unique_ptr<std::atomic_bool>>

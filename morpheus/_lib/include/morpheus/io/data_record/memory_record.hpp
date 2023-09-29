@@ -19,14 +19,17 @@
 
 #include "data_record_base.hpp"
 
+#include "morpheus/io/cache_manager.hpp"
+
 #include <cstdint>
 #include <memory>
 
 namespace morpheus::io {
+#pragma GCC visibility push(default)
 class MemoryRecord : public DataRecord
 {
   public:
-    MemoryRecord()  = default;
+    MemoryRecord() = default;
 
     /**
      * @brief Creates a new data record in memory.
@@ -72,8 +75,6 @@ class MemoryRecord : public DataRecord
      * @return A string representing the type of backing store.
      */
     std::string backing_store() const override;
-
-  private:
-    std::shared_ptr<uint8_t> m_data;
 };
+#pragma GCC visibility pop
 }  // namespace morpheus::io

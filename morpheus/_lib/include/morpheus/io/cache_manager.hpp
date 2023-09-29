@@ -54,6 +54,8 @@ struct CacheStatistics
 
 class CacheInstance;
 
+// TODO(Devin): I think this should be all static, refactor when time permits.
+// TODO(Devin): Add 'reset' method to reset all statistics and clear all caches.
 /**
  * @brief CacheManager class is responsible for managing all caching operations and policies.
  *
@@ -294,6 +296,16 @@ class CacheManagerInterface
     CacheManagerInterface();
 
     /**
+     * @brief Copy constructor.
+     *
+     * Creates a new CacheManagerInterface as a copy of an existing instance.
+     * The new object will interact with the same cache instance as the original.
+     *
+     * @param other The CacheManagerInterface object to copy from.
+     */
+    CacheManagerInterface(const CacheManagerInterface& other) = default;
+
+    /**
      * @brief Destructor that frees the allocated cache instance.
      */
     ~CacheManagerInterface();
@@ -331,6 +343,28 @@ class CacheManagerInterface
      * @return true if the object was successfully removed, false otherwise.
      */
     bool evict(const std::string& uuid);
+
+    /**
+     * @brief Retrieves the unique ID of the cache instance this interface operates on.
+     *
+     * This method returns the unique identifier (ID) for the cache instance managed
+     * by this CacheManagerInterface. The instance ID is used to interact with the
+     * underlying CacheManager.
+     *
+     * @return int : The unique ID of the associated cache instance.
+     */
+    int get_instance_id() const;
+
+    /**
+     * @brief Retrieves various statistics associated with this cache instance.
+     *
+     * This function returns a structure (or a tuple, dictionary, etc. depending on your
+     * choice of language features) that holds statistical information about this cache instance,
+     * such as the total number of objects, total bytes, pinned bytes, and so on.
+     *
+     * @return A structure containing statistical information.
+     */
+    InstanceStatistics get_statistics();
 
   private:
     int m_instance_id;  // The ID of the cache instance this interface operates on

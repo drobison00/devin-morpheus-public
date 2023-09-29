@@ -56,10 +56,34 @@ std::unique_ptr<morpheus::io::DataRecord> create_data_record_by_type(morpheus::i
 
 namespace morpheus::io {
 
+DataManager::~DataManager()
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    for (auto& [uuid, record] : m_records)
+    {
+        record->remove();
+    }
+
+    std::size_t interface_id = m_cache_interface.get_instance_id();
+
+    // TODO(Devin)
+    morpheus::io::CacheManager& cache_manager(morpheus::io::CacheManager::instance());
+    cache_manager.free_cache_instance(interface_id);
+}
+
+DataManager::DataManager() : m_cache_interface() {}
+
 std::string DataManager::create_(std::function<std::unique_ptr<DataRecord>()> factory_func,
                                  const uint8_t* bytes,
                                  std::size_t size)
 {
+    if (bytes == nullptr)
+    {
+        std::string error_message = "Invalid data pointer: cannot create a data record with null bytes";
+        LOG(ERROR) << error_message;
+        throw std::runtime_error(error_message);
+    }
+
     auto record = factory_func();
 
     if (!record)
@@ -67,7 +91,6 @@ std::string DataManager::create_(std::function<std::unique_ptr<DataRecord>()> fa
         LOG(ERROR) << "Failed to create DataRecord object using factory function";
         throw std::runtime_error("Failed to create DataRecord object using factory function");
     }
-    record->create(bytes, size);
 
     std::string uuid_str;
     bool is_unique = false;
@@ -80,6 +103,9 @@ std::string DataManager::create_(std::function<std::unique_ptr<DataRecord>()> fa
         std::lock_guard<std::mutex> lock(m_mutex);
         if (m_records.find(uuid_str) == m_records.end())
         {
+            record->uuid(uuid_str);
+            record->cache_interface(m_cache_interface);
+            record->create(bytes, size);
             m_records[uuid_str] = std::move(record);
             is_unique           = true;
         }
@@ -290,6 +316,13 @@ void DataManager::move_(const std::string& uuid, std::function<std::unique_ptr<D
 void DataManager::update_(const std::string& uuid, const uint8_t* bytes, std::size_t size_bytes)
 {
     std::lock_guard<std::mutex> lock(m_mutex);
+
+    if (bytes == nullptr)
+    {
+        std::string error_message = "Invalid data pointer: cannot create a data record with null bytes";
+        LOG(ERROR) << error_message;
+        throw std::runtime_error(error_message);
+    }
 
     auto it = m_records.find(uuid);
     if (it == m_records.end())

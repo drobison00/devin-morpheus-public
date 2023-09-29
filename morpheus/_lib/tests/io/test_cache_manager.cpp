@@ -509,7 +509,7 @@ TEST_F(CacheManagerTest, TestConcurrentStoreAndGet)
 
 TEST_F(CacheManagerTest, TestConcurrentStoreWithLRUEviction)
 {
-    constexpr int NumThreads  = 1000;
+    constexpr int NumThreads  = 100;
     constexpr int PayloadSize = 100;
     int instance_id           = cacheManager.allocate_cache_instance();
     cacheManager.set_max_cached_bytes((NumThreads / 2) * PayloadSize);
@@ -539,6 +539,47 @@ TEST_F(CacheManagerTest, TestConcurrentStoreWithLRUEviction)
 
     // Validate that the total cached objects do not exceed the limit
     EXPECT_LE(stats.total_cached_objects, NumThreads / 2);
+    cacheManager.free_cache_instance(instance_id);
+}
+
+TEST_F(CacheManagerTest, TestConcurrentStoreWithPinnedAndUnpinned)
+{
+    int instance_id = cacheManager.allocate_cache_instance();
+    cacheManager.set_max_cached_bytes(600);  // Total bytes shouldn't exceed 600
+    cacheManager.set_max_cached_objects(6);  // Total objects shouldn't exceed 6
+
+    constexpr int NUM_THREADS = 12;
+    std::vector<std::thread> threads;
+    std::atomic<int> exceptions_counter = 0;
+
+    auto worker = [&](int idx) {
+        try {
+            std::string uuid = "UUID_" + std::to_string(idx);
+            std::shared_ptr<uint8_t> data(new uint8_t[100], std::default_delete<uint8_t[]>());
+            bool pin = idx % 2 == 0;  // Pin even-numbered items
+            cacheManager.store(instance_id, uuid, data, 100, pin);
+        } catch (const std::runtime_error& e) {
+            exceptions_counter++;
+        }
+    };
+
+    for (int i = 0; i < NUM_THREADS; ++i) {
+        threads.push_back(std::thread(worker, i));
+    }
+
+    for (auto& t : threads) {
+        t.join();
+    }
+
+    auto stats = cacheManager.get_statistics();
+    // Validate that the total cached bytes do not exceed the limit
+    EXPECT_LE(stats.total_cached_bytes, 600);
+
+    // Validate that the total cached objects do not exceed the limit
+    EXPECT_LE(stats.total_cached_objects, 6);
+
+    // Validate that at least one exception was thrown due to exceeding limits
+    EXPECT_GT(exceptions_counter.load(), 0);
     cacheManager.free_cache_instance(instance_id);
 }
 

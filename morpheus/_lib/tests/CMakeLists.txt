@@ -106,7 +106,9 @@ endfunction()
 add_morpheus_test(
   NAME io
   FILES
+    io/data_record/test_memory_record.cpp
     io/test_cache_manager.cpp
+    io/test_cache_manager_interface.cpp
     io/test_data_loader.cpp
     io/test_data_loader_registry.cpp
     io/test_data_manager.cpp

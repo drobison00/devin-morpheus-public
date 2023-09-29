@@ -17,6 +17,8 @@
 
 #pragma once
 
+#include "morpheus/io/cache_manager.hpp"
+
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -24,6 +26,7 @@
 #include <vector>
 
 namespace morpheus::io {
+#pragma GCC visibility push(default)
 /**
  * @brief Abstract base class for a data record.
  *
@@ -92,7 +95,39 @@ class DataRecord
      */
     std::size_t size_bytes() const;
 
+    /**
+     * @brief Gets the UUID associated with this data record.
+     *
+     * @return The UUID as a string.
+     */
+    std::string uuid() const;
+
+    /**
+     * @brief Sets the UUID for this data record.
+     *
+     * @param new_uuid The new UUID to set.
+     */
+    void uuid(const std::string& new_uuid);
+
+    /**
+     * @brief Gets the CacheManagerInterface associated with this data record.
+     *
+     * @return A reference to the CacheManagerInterface.
+     */
+    CacheManagerInterface& cache_interface();
+
+    /**
+     * @brief Sets the CacheManagerInterface for this data record.
+     *
+     * @param new_cache_interface The new CacheManagerInterface to set.
+     */
+    void cache_interface(const CacheManagerInterface& new_cache_interface);
+
   protected:
-    std::size_t m_size_bytes = 0;
+    CacheManagerInterface m_cache_interface;  // Cache Manager Interface
+    std::weak_ptr<uint8_t> m_data;
+    std::string m_uuid;  // UUID to identify this memory record in the cache
+    std::size_t m_size_bytes{0};
 };
+#pragma GCC visibility pop
 }  // namespace morpheus::io

@@ -69,8 +69,8 @@ TEST_F(DataManagerTest, CreateRecordFailureWithMemoryType)
         FAIL() << "Expected std::runtime_error";
     } catch (const std::runtime_error& e)
     {
-        EXPECT_TRUE(std::string(e.what()).find("memory") != std::string::npos)
-            << "Exception message does not specify 'memory' type";
+        EXPECT_TRUE(std::string(e.what()).find("Invalid data pointer") != std::string::npos)
+            << "Exception message does not indicate memory pointer error";
     }
 }
 
@@ -85,8 +85,8 @@ TEST_F(DataManagerTest, CreateRecordFailureWithDiskType)
         FAIL() << "Expected std::runtime_error";
     } catch (const std::runtime_error& e)
     {
-        EXPECT_TRUE(std::string(e.what()).find("disk") != std::string::npos)
-            << "Exception message does not specify 'disk' type";
+        EXPECT_TRUE(std::string(e.what()).find("Invalid data pointer") != std::string::npos)
+            << "Exception message does not indicate memory pointer error";
     }
 }
 
@@ -413,56 +413,67 @@ TEST_F(DataManagerTest, AsyncMoveAndUpdate)
     ASSERT_EQ(update_data, result_data_);
 }
 
-TEST_F(DataManagerTest, TestZeroLengthData) {
+TEST_F(DataManagerTest, TestZeroLengthData)
+{
     DataManager dm;
 
     std::vector<uint8_t> zero_length_data;
-    try {
+    try
+    {
         auto uuid = dm.create(DataRecordType::memory, zero_length_data);
         FAIL() << "Expected std::runtime_error";
-    } catch (std::runtime_error const & err) {
-        ASSERT_NE(std::string(err.what()).find("invalid data pointer"), std::string::npos);
-    } catch (...) {
+    } catch (std::runtime_error const& err)
+    {
+        ASSERT_NE(std::string(err.what()).find("Invalid data pointer"), std::string::npos);
+    } catch (...)
+    {
         FAIL() << "Expected std::runtime_error";
     }
 }
 
-TEST_F(DataManagerTest, TestUpdateWithNullPtr) {
+TEST_F(DataManagerTest, TestUpdateWithNullPtr)
+{
     DataManager dm;
 
     // Create a record with some initial data
     std::vector<uint8_t> initial_data = {1, 2, 3};
-    auto uuid = dm.create(DataRecordType::memory, initial_data);
+    auto uuid                         = dm.create(DataRecordType::memory, initial_data);
 
     // Update with nullptr and zero size
-    try {
+    try
+    {
         dm.update(uuid, nullptr, 0);
         FAIL() << "Expected std::runtime_error";
-    } catch (std::runtime_error const & err) {
-        ASSERT_NE(std::string(err.what()).find("invalid data pointer"), std::string::npos);
-    } catch (...) {
+    } catch (std::runtime_error const& err)
+    {
+        ASSERT_NE(std::string(err.what()).find("Invalid data pointer"), std::string::npos);
+    } catch (...)
+    {
         FAIL() << "Expected std::runtime_error";
     }
 }
 
-TEST_F(DataManagerTest, TestFailingFactoryFunction) {
+TEST_F(DataManagerTest, TestFailingFactoryFunction)
+{
     DataManager dm;
 
     // Create a record with some initial data
     std::vector<uint8_t> initial_data = {1, 2, 3};
-    auto uuid = dm.create(DataRecordType::memory, initial_data);
+    auto uuid                         = dm.create(DataRecordType::memory, initial_data);
 
     // Failing factory function that returns nullptr
     auto failing_factory_func = []() -> std::unique_ptr<DataRecord> { return nullptr; };
 
-    try {
+    try
+    {
         // Attempt to move
         dm.move(uuid, failing_factory_func);
         FAIL() << "Expected std::runtime_error";
-    } catch (std::runtime_error const & err) {
+    } catch (std::runtime_error const& err)
+    {
         ASSERT_EQ(err.what(), std::string("Failed to create new DataRecord"));
-    } catch (...) {
+    } catch (...)
+    {
         FAIL() << "Expected std::runtime_error";
     }
 }
-

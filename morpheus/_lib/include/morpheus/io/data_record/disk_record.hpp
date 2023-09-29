@@ -23,6 +23,7 @@
 #include "data_record_base.hpp"
 
 namespace morpheus::io {
+#pragma GCC visibility push(default)
 class DiskRecord : public DataRecord
 {
     void create(const uint8_t* bytes, std::size_t size) override;
@@ -32,4 +33,5 @@ class DiskRecord : public DataRecord
 
     std::string backing_store() const override;
 };
+#pragma GCC visibility pop
 }  // namespace morpheus::io

@@ -437,4 +437,14 @@ bool CacheManagerInterface::evict(const std::string& uuid)
     return CacheManager::instance().evict(m_instance_id, uuid);
 }
 
+InstanceStatistics CacheManagerInterface::get_statistics()
+{
+    return CacheManager::instance().get_instance_statistics(m_instance_id);
+}
+
+int CacheManagerInterface::get_instance_id() const
+{
+    return m_instance_id;
+}
+
 }  // namespace morpheus::io

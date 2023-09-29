@@ -19,6 +19,8 @@
 
 #include "data_record/data_record_base.hpp"
 
+#include "morpheus/io/cache_manager.hpp"
+
 #include <boost/uuid/uuid.hpp>
 #include <boost/uuid/uuid_generators.hpp>
 #include <boost/uuid/uuid_io.hpp>
@@ -51,8 +53,8 @@ enum class DataRecordType
 class DataManager
 {
   public:
-    ~DataManager() = default;
-    DataManager()  = default;
+    ~DataManager();
+    DataManager();
 
     /**
      * @brief Creates a data record with the given type and data.
@@ -235,6 +237,7 @@ class DataManager
   private:
     std::mutex m_mutex;
     std::map<std::string, std::unique_ptr<DataRecord>> m_records;
+    CacheManagerInterface m_cache_interface;  // Cache Manager Interface
 
     std::string create_(std::function<std::unique_ptr<DataRecord>()> factory_func,
                         const uint8_t* bytes,

@@ -24,4 +24,24 @@ std::size_t DataRecord::size_bytes() const
 {
     return m_size_bytes;
 }
+
+CacheManagerInterface& DataRecord::cache_interface()
+{
+    return m_cache_interface;
+}
+
+void DataRecord::cache_interface(const morpheus::io::CacheManagerInterface& new_cache_interface)
+{
+    m_cache_interface = new_cache_interface;
+}
+
+std::string DataRecord::uuid() const
+{
+    return m_uuid;
+}
+
+void DataRecord::uuid(const std::string& new_uuid)
+{
+    m_uuid = new_uuid;
+}
 }  // namespace morpheus::io

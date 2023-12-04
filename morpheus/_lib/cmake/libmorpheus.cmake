@@ -51,6 +51,7 @@ add_library(morpheus
   src/messages/multi_tensor.cpp
   src/messages/multi.cpp
   src/modules/data_loader_module.cpp
+  src/modules/llm_engine_module.cpp
   src/objects/data_table.cpp
   src/objects/dev_mem_info.cpp
   src/objects/dtype.cpp

@@ -16,6 +16,7 @@
  */
 
 #include "morpheus/modules/data_loader_module.hpp"
+#include "morpheus/modules/llm_engine_module.hpp"
 #include "morpheus/utilities/string_util.hpp"
 #include "morpheus/version.hpp"
 
@@ -55,6 +56,7 @@ PYBIND11_MODULE(modules, _module)
     }
 
     mrc::modules::ModelRegistryUtil::create_registered_module<DataLoaderModule>("DataLoader", "morpheus", mrc_version);
+    mrc::modules::ModelRegistryUtil::create_registered_module<LLMEngineModule>("LLMEngine", "morpheus", mrc_version);
 
     _module.attr("__version__") =
         MORPHEUS_CONCAT_STR(morpheus_VERSION_MAJOR << "." << morpheus_VERSION_MINOR << "." << morpheus_VERSION_PATCH);

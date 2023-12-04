@@ -23,11 +23,19 @@ from mrc.core import operators as ops
 from morpheus.cli.register_stage import register_stage
 from morpheus.config import Config
 from morpheus.io import serializers
+from morpheus.messages import ControlMessage
 from morpheus.messages import MessageMeta
 from morpheus.pipeline.pass_thru_type_mixin import PassThruTypeMixin
 from morpheus.pipeline.single_port_stage import SinglePortStage
 
 logger = logging.getLogger(__name__)
+
+
+def default_message_iterator(message: typing.Union[MessageMeta, ControlMessage]):
+    input_df = message.df if isinstance(message, MessageMeta) else message.payload().df
+    records = serializers.df_to_json(input_df, strip_newlines=True)
+    for record in records:
+        yield record
 
 
 @register_stage("to-kafka")
@@ -46,13 +54,18 @@ class WriteToKafkaStage(PassThruTypeMixin, SinglePortStage):
 
     """
 
-    def __init__(self, c: Config, bootstrap_servers: str, output_topic: str, client_id: str = None):
+    def __init__(self, c: Config,
+                 bootstrap_servers: str,
+                 output_topic: str,
+                 client_id: str = None,
+                 message_iterator: typing.Callable = None):
         super().__init__(c)
 
         self._kafka_conf = {'bootstrap.servers': bootstrap_servers}
         if client_id is not None:
             self._kafka_conf['client.id'] = client_id
 
+        self._message_iterator = message_iterator or default_message_iterator
         self._output_topic = output_topic
         self._poll_time = 0.2
         self._max_concurrent = c.num_threads
@@ -71,7 +84,7 @@ class WriteToKafkaStage(PassThruTypeMixin, SinglePortStage):
             Accepted input types.
 
         """
-        return (MessageMeta, )
+        return (MessageMeta, ControlMessage,)
 
     def supports_cpp_node(self):
         return False
@@ -85,7 +98,7 @@ class WriteToKafkaStage(PassThruTypeMixin, SinglePortStage):
 
             outstanding_requests = 0
 
-            def on_next(x: MessageMeta):
+            def on_next(x: typing.Union[MessageMeta, ControlMessage]):
                 nonlocal outstanding_requests
 
                 def callback(_, msg):
@@ -93,21 +106,23 @@ class WriteToKafkaStage(PassThruTypeMixin, SinglePortStage):
                         pass
                     else:
                         # fut.set_exception(err or msg.error())
+                        msg_val = msg.value() if msg is not None else None
+                        msg_err = msg.error() if msg is not None else None
                         logger.error(("Error occurred in `to-kafka` stage with broker '%s' "
                                       "while committing message:\n%s\nError:\n%s"),
                                      self._kafka_conf["bootstrap.servers"],
-                                     msg.value(),
-                                     msg.error())
-                        sub.on_error(msg.error())
+                                     msg_val,
+                                     msg_err)
+                        sub.on_error(msg_err)
 
-                records = serializers.df_to_json(x.df, strip_newlines=True)
-                for mess in records:
+                records = self._message_iterator(x)
+                for record in records:
 
-                    # Push all of the messages
+                    # Push all the messages
                     while True:
                         try:
                             # this runs asynchronously, in C-K's thread
-                            producer.produce(self._output_topic, mess, callback=callback)
+                            producer.produce(self._output_topic, record, callback=callback)
                             break
                         except BufferError:
                             time.sleep(self._poll_time)
@@ -115,7 +130,7 @@ class WriteToKafkaStage(PassThruTypeMixin, SinglePortStage):
                             logger.exception(("Error occurred in `to-kafka` stage with broker '%s' "
                                               "while committing message:\n%s"),
                                              self._kafka_conf["bootstrap.servers"],
-                                             mess)
+                                             record)
                             break
                         finally:
                             # Try and process some

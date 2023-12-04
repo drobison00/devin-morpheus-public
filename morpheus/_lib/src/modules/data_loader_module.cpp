@@ -28,6 +28,7 @@
 #include <mrc/segment/builder.hpp>
 #include <mrc/utils/type_utils.hpp>
 #include <nlohmann/json.hpp>
+#include <pymrc/utilities/object_cache.hpp>
 #include <rxcpp/rx.hpp>
 // IWYU pragma: no_include "rxcpp/sources/rx-iterate.hpp"
 
@@ -113,4 +114,5 @@ std::string DataLoaderModule::module_type_name() const
 {
     return std::string(::mrc::type_name<type_t>());
 }
+
 }  // namespace morpheus

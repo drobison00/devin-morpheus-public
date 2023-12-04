@@ -19,7 +19,6 @@
 #include "./include/py_llm_node.hpp"
 #include "./include/py_llm_node_base.hpp"
 #include "./include/py_llm_task_handler.hpp"
-#include "py_llm_engine_stage.hpp"
 #include "py_llm_lambda_node.hpp"
 
 #include "morpheus/llm/input_map.hpp"
@@ -338,12 +337,6 @@ PYBIND11_MODULE(llm, _module)
              py::arg("fn"))
         .def("get_input_names", &PyLLMLambdaNode::get_input_names)
         .def("execute", &PyLLMLambdaNode::execute, py::arg("context"));
-
-    py::class_<mrc::segment::Object<PyLLMEngineStage>,
-               mrc::segment::ObjectProperties,
-               std::shared_ptr<mrc::segment::Object<PyLLMEngineStage>>>(
-        _module, "LLMEngineStage", py::multiple_inheritance())
-        .def(py::init<>(&PyLLMEngineStage::init), py::arg("builder"), py::arg("name"), py::arg("engine"));
 
     _module.attr("__version__") =
         MRC_CONCAT_STR(morpheus_VERSION_MAJOR << "." << morpheus_VERSION_MINOR << "." << morpheus_VERSION_PATCH);

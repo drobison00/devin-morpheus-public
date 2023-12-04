@@ -17,12 +17,12 @@ import typing
 
 import mrc
 
-import morpheus._lib.llm as _llm
 from morpheus.config import Config
 from morpheus.llm import LLMEngine
 from morpheus.messages import ControlMessage
 from morpheus.pipeline.pass_thru_type_mixin import PassThruTypeMixin
 from morpheus.pipeline.single_port_stage import SinglePortStage
+from morpheus.utils.module_utils import load_module
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +42,12 @@ class LLMEngineStage(PassThruTypeMixin, SinglePortStage):
     def __init__(self, c: Config, *, engine: LLMEngine):
         super().__init__(c)
 
-        self._engine = engine
+        self._module_config = {
+            "module_id": "LLMEngine",
+            "namespace": "morpheus",
+            "module_name": "llm_engine",
+            "llm_engine": engine,
+        }
 
     @property
     def name(self) -> str:
@@ -59,17 +64,14 @@ class LLMEngineStage(PassThruTypeMixin, SinglePortStage):
             Accepted input types.
 
         """
-        return (ControlMessage, )
+        return (ControlMessage,)
 
     def supports_cpp_node(self):
         """Indicates whether this stage supports a C++ node."""
         return True
 
     def _build_single(self, builder: mrc.Builder, input_node: mrc.SegmentObject) -> mrc.SegmentObject:
+        llm_engine_module = load_module(self._module_config, builder=builder)
+        builder.make_edge(input_node, llm_engine_module.input_port("input"))
 
-        node = _llm.LLMEngineStage(builder, self.unique_name, self._engine)
-        node.launch_options.pe_count = 1
-
-        builder.make_edge(input_node, node)
-
-        return node
+        return llm_engine_module.output_port("output")

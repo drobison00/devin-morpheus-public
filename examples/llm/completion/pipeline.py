@@ -29,7 +29,6 @@ from morpheus.llm.services.openai_chat_service import OpenAIChatService
 from morpheus.llm.task_handlers.simple_task_handler import SimpleTaskHandler
 from morpheus.messages import ControlMessage
 from morpheus.pipeline.linear_pipeline import LinearPipeline
-from morpheus.stages.general.linear_modules_stage import LinearModulesStage
 from morpheus.stages.general.monitor_stage import MonitorStage
 from morpheus.stages.input.in_memory_source_stage import InMemorySourceStage
 from morpheus.stages.llm.llm_engine_stage import LLMEngineStage
@@ -110,22 +109,7 @@ def pipeline(num_threads: int, pipeline_batch_size: int, model_max_batch_size: i
 
     pipe.add_stage(MonitorStage(config, description="Source rate", unit='questions'))
 
-    # pipe.add_stage(LLMEngineStage(config, engine=_build_engine(llm_service=llm_service)))
-
-    llm_engine_module_config = {
-        "module_id": "LLMEngine",
-        "namespace": "morpheus",
-        "module_name": "llm_engine",
-        "llm_engine": _build_engine(llm_service=llm_service)
-    }
-    pipe.add_stage(
-        LinearModulesStage(config,
-                           llm_engine_module_config,
-                           input_type=ControlMessage,
-                           output_type=ControlMessage,
-                           input_port_name="input",
-                           output_port_name="output")
-    )
+    pipe.add_stage(LLMEngineStage(config, engine=_build_engine(llm_service=llm_service)))
 
     sink = pipe.add_stage(InMemorySinkStage(config))
 

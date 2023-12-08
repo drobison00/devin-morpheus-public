@@ -21,6 +21,22 @@ from morpheus.llm import LLMNodeBase
 logger = logging.getLogger(__name__)
 
 
+def extractor_node_execute(context: LLMContext):
+    # Get the keys from the task
+    input_keys: list[str] = typing.cast(list[str], context.task()["input_keys"])
+
+    with context.message().payload().mutable_dataframe() as df:
+        input_dict: list[dict] = df[input_keys].to_dict(orient="list")
+
+    if (len(input_keys) == 1):
+        # Extract just the first key if there is only 1
+        context.set_output(input_dict[input_keys[0]])
+    else:
+        context.set_output(input_dict)
+
+    return context
+
+
 class ExtracterNode(LLMNodeBase):
     """
     Extracts fields from the DataFrame contained by the message attached to the `LLMContext` and copies them directly

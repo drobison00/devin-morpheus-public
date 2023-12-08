@@ -80,7 +80,9 @@ namespace morpheus {
 #pragma GCC visibility push(default)
 class LLMEngineModule : public mrc::modules::SegmentModule, public mrc::modules::PersistentModule
 {
-    using type_t = LLMEngineModule;
+    using type_t  = LLMEngineModule;
+    using in_dtype_t = std::shared_ptr<ControlMessage>;
+    using out_dtype_t = std::shared_ptr<llm::LLMContext>;
 
   public:
     ~LLMEngineModule() override;
@@ -90,7 +92,7 @@ class LLMEngineModule : public mrc::modules::SegmentModule, public mrc::modules:
 
   protected:
     void initialize(mrc::segment::IBuilder& builder) override;
-    std::string module_type_name() const override;
+    [[nodiscard]] std::string module_type_name() const override;
 
   private:
     std::string m_engine_name{};

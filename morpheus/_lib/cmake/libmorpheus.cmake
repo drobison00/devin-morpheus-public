@@ -78,6 +78,7 @@ add_library(morpheus
   src/stages/serialize.cpp
   src/stages/triton_inference.cpp
   src/stages/write_to_file.cpp
+  src/utilities/caching_util.cpp
   src/utilities/cudf_util.cpp
   src/utilities/cupy_util.cpp
   src/utilities/http_server.cpp

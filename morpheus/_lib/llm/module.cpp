@@ -20,6 +20,7 @@
 #include "./include/py_llm_node_base.hpp"
 #include "./include/py_llm_task_handler.hpp"
 #include "py_llm_lambda_node.hpp"
+#include "pymrc/utilities/object_wrappers.hpp"
 
 #include "morpheus/llm/input_map.hpp"
 #include "morpheus/llm/llm_context.hpp"
@@ -36,6 +37,7 @@
 #include "morpheus/utilities/json_types.hpp"
 #include "morpheus/version.hpp"
 
+#include <mrc/edge/edge_connector.hpp>
 #include <mrc/utils/string_utils.hpp>
 #include <nlohmann/detail/exceptions.hpp>
 #include <nlohmann/json.hpp>
@@ -46,6 +48,7 @@
 #include <pybind11/pytypes.h>     // for dict, sequence
 #include <pybind11/stl.h>         // IWYU pragma: keep
 #include <pymrc/coro.hpp>         // IWYU pragma: keep
+#include <pymrc/node.hpp>         // IWYU pragma: keep
 #include <pymrc/utils.hpp>        // for pymrc::import
 
 #include <memory>
@@ -77,6 +80,11 @@ PYBIND11_MODULE(llm, _module)
 
     // Import the messages module
     mrc::pymrc::import(_module, "morpheus._lib.messages");
+
+    mrc::edge::EdgeConnector<std::shared_ptr<morpheus::llm::LLMContext>,
+                             mrc::pymrc::PyObjectHolder>::register_converter();
+    mrc::edge::EdgeConnector<mrc::pymrc::PyObjectHolder,
+                             std::shared_ptr<morpheus::llm::LLMContext>>::register_converter();
 
     py::class_<InputMap>(_module, "InputMap")
         .def(py::init<>())

@@ -47,17 +47,20 @@ void LLMEngine::add_task_handler(user_input_mappings_t inputs, std::shared_ptr<L
 
 Task<std::vector<std::shared_ptr<ControlMessage>>> LLMEngine::run(std::shared_ptr<ControlMessage> input_message)
 {
+    // TODO(Devin): This shouldn't be a hard runtime error, should be configurable.
     if (!input_message)
     {
         throw std::runtime_error("LLMEngine::run() called with a null message");
     }
 
+    std::vector<std::shared_ptr<ControlMessage>> output_messages;
+
+    // TODO(Devin): Also, definitely should not be a runtime error, if our CM doesn't have an LLM engine task, we should
+    // simply forward it. This is way too specific in any event, because it effectively blocks any flowthrough.
     if (!input_message->has_task("llm_engine"))
     {
         throw std::runtime_error("LLMEngine::run() called with a message that does not have the 'llm_engine' task");
     }
-
-    std::vector<std::shared_ptr<ControlMessage>> output_messages;
 
     while (input_message->has_task("llm_engine"))
     {
@@ -70,6 +73,7 @@ Task<std::vector<std::shared_ptr<ControlMessage>>> LLMEngine::run(std::shared_pt
         auto context = std::make_shared<LLMContext>(tmp_task, input_message);
 
         // Call the base node
+        // TODO(Devin): execute shouldn't exist, these should all be downstream nodes.
         co_await this->execute(context);
 
         // Pass the outputs into the task generators

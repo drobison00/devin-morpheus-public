@@ -39,7 +39,7 @@ class LLMEngineStage(PassThruTypeMixin, SinglePortStage):
         LLM engine instance to execute.
    """
 
-    def __init__(self, c: Config, *, engine: LLMEngine):
+    def __init__(self, c: Config, *, engine: LLMEngine, engine_config: dict = None):
         super().__init__(c)
 
         self._module_config = {
@@ -47,6 +47,7 @@ class LLMEngineStage(PassThruTypeMixin, SinglePortStage):
             "namespace": "morpheus",
             "module_name": "llm_engine",
             "llm_engine": engine,
+            "engine_config": engine_config or {},
         }
 
     @property

@@ -16,6 +16,9 @@ import logging
 import time
 
 import cudf
+# TODO(Devin): Should be somewhere else
+import mrc
+from mrc.core import operators as ops
 
 from morpheus.config import Config
 from morpheus.config import PipelineModes
@@ -109,7 +112,26 @@ def pipeline(num_threads: int, pipeline_batch_size: int, model_max_batch_size: i
 
     pipe.add_stage(MonitorStage(config, description="Source rate", unit='questions'))
 
-    pipe.add_stage(LLMEngineStage(config, engine=_build_engine(llm_service=llm_service)))
+    def create_cm(cm: ControlMessage):
+        print(f"CREATE CM CALLED, with cm: {cm}")
+        return cm
+
+    def test_function(builder: mrc.Builder):
+        print(f"TEST FUNCTION CALLED, with builder: {builder}")
+        node = builder.make_node("TEST_NODE", ops.map(create_cm))
+
+        return node
+
+    llm_engine_config = {
+        "children": [
+            {
+                "name": "dummy_forwarder",
+                "node": test_function,
+            }
+        ]
+    }
+    pipe.add_stage(
+        LLMEngineStage(config, engine=_build_engine(llm_service=llm_service), engine_config=llm_engine_config))
 
     sink = pipe.add_stage(InMemorySinkStage(config))
 

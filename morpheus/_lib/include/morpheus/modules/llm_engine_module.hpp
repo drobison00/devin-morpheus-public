@@ -96,7 +96,6 @@ class LLMEngineModule : public mrc::modules::SegmentModule, public mrc::modules:
 
   private:
     std::string m_engine_name{};
-    std::shared_ptr<llm::LLMEngine> m_engine;
 };
 #pragma GCC visibility pop
 }  // namespace morpheus

@@ -30,5 +30,6 @@ namespace morpheus {
 std::function<std::shared_ptr<mrc::segment::ObjectProperties>(mrc::segment::IBuilder&)> retrieve_cached_initializer(
     const std::string& uuid);
 
+
 pybind11::object retrieve_cached_pyobject(const std::string& uuid);
 }  // namespace morpheus

@@ -54,7 +54,7 @@ class LLMLambdaNode : public LLMNodeBase
       m_function(std::move(function))
     {}
 
-    std::vector<std::string> get_input_names() const override
+    [[nodiscard]] std::vector<std::string> get_input_names() const override
     {
         return m_input_names;
     }

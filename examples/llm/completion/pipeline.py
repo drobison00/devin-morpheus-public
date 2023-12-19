@@ -18,14 +18,16 @@ import time
 import cudf
 # TODO(Devin): Should be somewhere else
 import mrc
+import mrc.benchmarking
 from mrc.core import operators as ops
+
 from functools import partial
 
 from morpheus.config import Config
 from morpheus.config import PipelineModes
 from morpheus.llm import LLMEngine
 from morpheus.llm import LLMContext
-from morpheus.llm.nodes.extracter_node import ExtracterNode
+from morpheus.llm.nodes.extracter_node import ExtracterNode, extractor_node_initializer, extractor_node_execute_async
 from morpheus.llm.nodes.llm_generate_node import LLMGenerateNode
 from morpheus.llm.nodes.prompt_template_node import PromptTemplateNode
 from morpheus.llm.services.llm_service import LLMService
@@ -156,7 +158,7 @@ def pipeline(num_threads: int, pipeline_batch_size: int, model_max_batch_size: i
         "pipeline": [
             {
                 "name": "dummy_forwarder_1",
-                "node": test_function,
+                "async_node": extractor_node_execute_async,
             },
             {
                 "name": "dummy_forwarder_2",
@@ -173,7 +175,7 @@ def pipeline(num_threads: int, pipeline_batch_size: int, model_max_batch_size: i
         ]
     }
     pipe.add_stage(
-        LLMEngineStage(config, engine=_build_engine(llm_service=llm_service), engine_config=llm_engine_config))
+        LLMEngineStage(config, engine_config=llm_engine_config))
 
     sink = pipe.add_stage(InMemorySinkStage(config))
 
@@ -181,7 +183,18 @@ def pipeline(num_threads: int, pipeline_batch_size: int, model_max_batch_size: i
 
     start_time = time.time()
 
+    mrc.benchmarking.reset_tracing_stats()
+    mrc.benchmarking.trace_operators(True)
+    mrc.benchmarking.trace_channels(True)
+
+    # Convert to global names
     pipe.run()
+
+    framework_stats_info = mrc.benchmarking.get_tracing_stats()
+
+    import json
+    with open("framework_stats.json", "w") as f:
+        f.write(json.dumps(framework_stats_info, indent=2))
 
     messages = sink.get_messages()
     responses = concat_dataframes(messages)

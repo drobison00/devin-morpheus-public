@@ -22,12 +22,14 @@
 #include "morpheus/utilities/caching_util.hpp"
 
 #include <glog/logging.h>
+#include <mrc/coroutines/task.hpp>
 #include <mrc/modules/segment_modules.hpp>
 #include <mrc/segment/builder.hpp>
 #include <mrc/segment/object.hpp>
 #include <mrc/utils/type_utils.hpp>
 #include <nlohmann/json.hpp>
 #include <pybind11/pybind11.h>
+#include <pybind11/stl.h>
 #include <pymrc/utilities/object_cache.hpp>
 #include <rxcpp/rx.hpp>
 // IWYU pragma: no_include "rxcpp/sources/rx-iterate.hpp"
@@ -46,12 +48,31 @@ using json   = nlohmann::json;
 
 namespace {
 using namespace morpheus;
+
+// TODO(Devin): Hack to retrieve an async python function
+py::object retrieve_cached_executor(const std::string& uuid)
+{
+    auto& py_cache_handle = mrc::pymrc::PythonObjectCache::get_handle();
+
+    if (py_cache_handle.contains(uuid))
+    {
+        py::object py_object = py_cache_handle.pop(uuid);
+        py::print(py::str("Executor retrieved") + py::str(py_object));
+
+        return py_object;
+    }
+    else
+    {
+        throw std::runtime_error("Cached initializer not found for UUID: " + uuid);
+    }
+}
+
 template <typename SinkTypeT, typename SourceTypeT, typename ContextT>
 class LLMEngineNode
   : public mrc::pymrc::AsyncioRunnable<std::shared_ptr<ControlMessage>, std::shared_ptr<llm::LLMContext>>
 {
   public:
-    LLMEngineNode(std::shared_ptr<llm::LLMEngine> engine) : m_engine(std::move(engine)) {}
+    LLMEngineNode() = default;
 
     ~LLMEngineNode() override = default;
 
@@ -105,8 +126,82 @@ class LLMEngineNode
 
         co_return;
     }
+};
 
-    std::shared_ptr<llm::LLMEngine> m_engine;
+template <typename SinkTypeT, typename SourceTypeT, typename ContextT>
+class LLMAsyncPipelineNode
+  : public mrc::pymrc::AsyncioRunnable<std::shared_ptr<llm::LLMContext>, std::shared_ptr<llm::LLMContext>>
+{
+  public:
+    LLMAsyncPipelineNode(pybind11::function on_data_func) : m_on_data_func(std::move(on_data_func))
+    {
+        if (!m_on_data_func)
+        {
+            throw std::runtime_error("LLMAsyncPipelineNode::LLMAsyncPipelineNode() called with a null function");
+        }
+
+        auto asyncio = pybind11::module_::import("asyncio");
+
+        if (!asyncio.attr("iscoroutinefunction")(m_on_data_func).cast<bool>())
+        {
+            throw std::invalid_argument(MORPHEUS_CONCAT_STR(
+                "Invalid function '" << py::str(m_on_data_func) << "'. Function must be a coroutine function"));
+        }
+
+        auto at_exit = pybind11::module_::import("atexit");
+        at_exit.attr("register")(pybind11::cpp_function([this]() {
+            this->atexit_callback();
+        }));
+    }
+
+    void atexit_callback()
+    {
+        py::gil_scoped_acquire gil;
+        py::print("LLMAsyncPipelineNode::atexit_callback() called for {py::str(m_on_data_func)}");
+        py::print("LLMAsyncPipelineNode::atexit_callback() m_on_data_func.ref_count():" +
+                  std::to_string(m_on_data_func.ref_count()));
+        m_on_data_func.dec_ref();
+        m_on_data_func.release();
+        py::print("LLMAsyncPipelineNode::atexit_callback() finished");
+    }
+
+    ~LLMAsyncPipelineNode() override
+    {
+        // TODO(Devin): Testing hack.
+        VLOG(2) << "LLMAsyncPipelineNode::~LLMAsyncPipelineNode() called" << std::endl;
+    };
+
+  private:
+    pybind11::function m_on_data_func;
+
+    mrc::coroutines::AsyncGenerator<std::shared_ptr<llm::LLMContext>> on_data(
+        std::shared_ptr<llm::LLMContext>&& context) override
+    {
+        auto py_coro = m_on_data_func(std::move(context));
+        VLOG(2) << "m_on_data_func.ref_count():" + std::to_string(m_on_data_func.ref_count());
+
+        // Double check that the returned value is a coroutine
+        auto asyncio_module = pybind11::module::import("asyncio");
+
+        if (!asyncio_module.attr("iscoroutine")(py_coro).cast<bool>())
+        {
+            pybind11::pybind11_fail(
+                MORPHEUS_CONCAT_STR("Return value from LLMLambdaNode function did not return a coroutine. Returned: "
+                                    << py::str(py_coro).cast<std::string>()));
+        }
+
+        auto o_task = asyncio_module.attr("create_task")(py_coro);
+        mrc::pymrc::PyHolder o_result;
+        {
+            pybind11::gil_scoped_release nogil;
+            o_result = co_await mrc::pymrc::coro::PyTaskToCppAwaitable(std::move(o_task));
+            DCHECK_EQ(PyGILState_Check(), 0) << "Should not have the GIL after returning from co_await";
+        }
+
+        co_yield context;
+
+        co_return;
+    }
 };
 
 std::shared_ptr<mrc::segment::ObjectProperties> process_node(const json& child,
@@ -114,9 +209,9 @@ std::shared_ptr<mrc::segment::ObjectProperties> process_node(const json& child,
                                                              std::smatch& uuid_match,
                                                              mrc::segment::IBuilder& builder)
 {
-    if (!child.contains("node") || !child.contains("name"))
+    if (!(child.contains("node") || child.contains("async_node")) || !child.contains("name"))
     {
-        throw std::runtime_error("Each child must contain a 'node' and a 'name' key.");
+        throw std::runtime_error("Each child must contain a 'node' or 'async_node' and a 'name' key.");
     }
 
     if (!child["name"].is_string())
@@ -125,16 +220,46 @@ std::shared_ptr<mrc::segment::ObjectProperties> process_node(const json& child,
     }
 
     std::string name = child["name"];
-    std::string node = child["node"];
+    std::string node;
+
+    bool is_async = false;
+    if (child.contains("node"))
+    {
+        node = child["node"];
+    }
+    else
+    {
+        node     = child["async_node"];
+        is_async = true;
+    }
+
+    // TODO(Devin): Shouldn't have to be a cache_object -> add handlers for text configurations
     if (!std::regex_match(node, uuid_match, uuid_regex))
     {
         throw std::runtime_error("'node' does not match the required format 'cache_object:[UUID]'.");
     }
 
-    std::string uuid        = uuid_match[1].str();
-    auto cached_initializer = retrieve_cached_initializer(uuid);
+    std::string uuid = uuid_match[1].str();
+    if (is_async)
+    {
+        auto executor = retrieve_cached_executor(uuid);
 
-    return cached_initializer(builder);
+        // Create the async node
+        auto async_node =
+            builder.make_node<std::shared_ptr<llm::LLMContext>, std::shared_ptr<llm::LLMContext>, LLMAsyncPipelineNode>(
+                name, executor);
+
+        return async_node;
+    }
+    else
+    {
+        auto initializer = retrieve_cached_initializer(uuid);
+
+        // Create the node
+        auto sync_node = initializer(builder);
+
+        return sync_node;
+    }
 }
 
 std::vector<std::shared_ptr<mrc::segment::ObjectProperties>> process_pipeline(const json& engine_config,
@@ -142,7 +267,7 @@ std::vector<std::shared_ptr<mrc::segment::ObjectProperties>> process_pipeline(co
 {
     if (engine_config.contains("pipeline") && !engine_config["pipeline"].is_array())
     {
-        throw std::runtime_error("Pipeline must contain a list of stages.");
+        throw std::runtime_error("LLM Pipeline definition should contain a list of node elements.");
     }
 
     std::vector<std::shared_ptr<mrc::segment::ObjectProperties>> child_nodes;
@@ -168,36 +293,37 @@ LLMEngineModule::~LLMEngineModule() noexcept
 LLMEngineModule::LLMEngineModule(std::string module_name, nlohmann::json _config) :
   SegmentModule(std::move(module_name), std::move(_config))
 {
-    if (config().contains("llm_engine"))
-    {
-        auto engine_config = config()["llm_engine"].get<std::string>();
-        std::regex uuid_regex("cache_object:([0-9a-fA-F-]{36})");
-        std::smatch uuid_match;
-        if (std::regex_search(engine_config, uuid_match, uuid_regex))
-        {
-            std::string uuid   = uuid_match[1];
-            auto& cache_handle = mrc::pymrc::PythonObjectCache::get_handle();
+    // TODO(Devin): m_engine does not fit the normal design pattern, we dont' need it to construct an LLMENgine module.
+    // if (config().contains("llm_engine"))
+    //{
+    //    auto engine_config = config()["llm_engine"].get<std::string>();
+    //    std::regex uuid_regex("cache_object:([0-9a-fA-F-]{36})");
+    //    std::smatch uuid_match;
+    //    if (std::regex_search(engine_config, uuid_match, uuid_regex))
+    //    {
+    //        std::string uuid   = uuid_match[1];
+    //        auto& cache_handle = mrc::pymrc::PythonObjectCache::get_handle();
 
-            if (cache_handle.contains(uuid))
-            {
-                auto cached_object = cache_handle.pop(uuid);
-                m_engine           = pybind11::cast<std::shared_ptr<llm::LLMEngine>>(cached_object);
-                VLOG(2) << "Engine object successfully cast and stored in m_engine";
-            }
-            else
-            {
-                throw std::runtime_error("UUID not found in Python object cache");
-            }
-        }
-        else
-        {
-            throw std::runtime_error("Invalid llm_engine format. Expected 'cached_object:[UUID]'");
-        }
-    }
-    else
-    {
-        throw std::runtime_error("LLMEngineModule requires 'llm_engine' key in the config");
-    }
+    //        if (cache_handle.contains(uuid))
+    //        {
+    //            auto cached_object = cache_handle.pop(uuid);
+    //            m_engine           = pybind11::cast<std::shared_ptr<llm::LLMEngine>>(cached_object);
+    //            VLOG(2) << "Engine object successfully cast and stored in m_engine";
+    //        }
+    //        else
+    //        {
+    //            throw std::runtime_error("UUID not found in Python object cache");
+    //        }
+    //    }
+    //    else
+    //    {
+    //        throw std::runtime_error("Invalid llm_engine format. Expected 'cached_object:[UUID]'");
+    //    }
+    //}
+    // else
+    //{
+    //    throw std::runtime_error("LLMEngineModule requires 'llm_engine' key in the config");
+    //}
 }
 
 void LLMEngineModule::initialize(mrc::segment::IBuilder& builder)
@@ -205,7 +331,7 @@ void LLMEngineModule::initialize(mrc::segment::IBuilder& builder)
     // TODO(Devin): Convert to make_node for consistency & understanding - can use construct_object later, or
     //   better yet, improve make_node so it doesn't try to use LLMEngineNode as the SourceTypeT
     // auto llm_engine_node = builder.construct_object<LLMEngineNode>(m_engine_name, m_engine);
-    auto llm_engine_node = builder.make_node<in_dtype_t, out_dtype_t, LLMEngineNode>(m_engine_name, m_engine);
+    auto llm_engine_node = builder.make_node<in_dtype_t, out_dtype_t, LLMEngineNode>(m_engine_name);
 
     VLOG(2) << "LLMEngineModule::initialize(): " << std::endl << config().dump(2) << std::endl;
     std::vector<std::shared_ptr<mrc::segment::ObjectProperties>> child_nodes;

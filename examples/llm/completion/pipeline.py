@@ -14,6 +14,7 @@
 
 import logging
 import time
+from functools import partial
 
 import cudf
 # TODO(Devin): Should be somewhere else
@@ -21,13 +22,11 @@ import mrc
 import mrc.benchmarking
 from mrc.core import operators as ops
 
-from functools import partial
-
 from morpheus.config import Config
 from morpheus.config import PipelineModes
-from morpheus.llm import LLMEngine
 from morpheus.llm import LLMContext
-from morpheus.llm.nodes.extracter_node import ExtracterNode, extractor_node_initializer, extractor_node_execute_async
+from morpheus.llm import LLMEngine
+from morpheus.llm.nodes.extracter_node import ExtracterNode
 from morpheus.llm.nodes.llm_generate_node import LLMGenerateNode
 from morpheus.llm.nodes.prompt_template_node import PromptTemplateNode
 from morpheus.llm.services.llm_service import LLMService
@@ -135,6 +134,10 @@ def pipeline(num_threads: int, pipeline_batch_size: int, model_max_batch_size: i
 
         return message
 
+    async def async_test_function(context: LLMContext) -> LLMContext:
+        print("In async_test_function, returning context")
+        return context
+
     def test_function(builder: mrc.Builder):
         print(f"TEST FUNCTION CALLED, with builder: {builder}")
         node = builder.make_node("test_node_static", ops.map(static_function))
@@ -157,12 +160,12 @@ def pipeline(num_threads: int, pipeline_batch_size: int, model_max_batch_size: i
     llm_engine_config = {
         "pipeline": [
             {
-                "name": "dummy_forwarder_1",
-                "async_node": extractor_node_execute_async,
-            },
-            {
                 "name": "dummy_forwarder_2",
                 "node": partial(test_function_2, function_index="2"),
+            },
+            {
+                "name": "dummy_forwarder_1",
+                "async_node": async_test_function,
             },
             {
                 "name": "dummy_forwarder_3",

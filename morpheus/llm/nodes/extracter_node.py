@@ -47,6 +47,7 @@ def extractor_node_execute(context: LLMContext):
 
 async def extractor_node_execute_async(context: LLMContext):
     # Get the keys from the task
+    print("Calling extractor_node_execute_async")
     input_keys: list[str] = typing.cast(list[str], context.task()["input_keys"])
 
     with context.message().payload().mutable_dataframe() as df:
@@ -58,7 +59,8 @@ async def extractor_node_execute_async(context: LLMContext):
     else:
         context.set_output(input_dict)
 
-    return context
+    print("Returning from extractor_node_execute_async")
+    yield context
 
 
 class ExtracterNode(LLMNodeBase):

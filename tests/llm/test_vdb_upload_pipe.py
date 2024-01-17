@@ -18,6 +18,7 @@ import json
 import os
 import types
 from unittest import mock
+from morpheus.config import Config
 
 import numpy as np
 import pandas as pd
@@ -27,10 +28,6 @@ from _utils import TEST_DIRS
 from _utils import mk_async_infer
 from _utils.dataset_manager import DatasetManager
 from morpheus.service.vdb.milvus_vector_db_service import MilvusVectorDBService
-
-EMBEDDING_SIZE = 384
-MODEL_MAX_BATCH_SIZE = 64
-MODEL_FEA_LENGTH = 512
 
 @pytest.fixture(scope="session", name="vdb_conf_path")
 def vdb_conf_path_fixture():
@@ -52,25 +49,41 @@ def vdb_conf_path_fixture():
 def test_vdb_upload_pipe(mock_triton_client: mock.MagicMock,
                          mock_requests_session: mock.MagicMock,
                          dataset: DatasetManager,
-                        #  milvus_server_uri: str,
+                         milvus_server_uri: str,
                          import_mod: list[types.ModuleType],
                          vdb_conf_path: dict):
     # We're going to use this DF to both provide values to the mocked Tritonclient,
     # but also to verify the values in the Milvus collection.
     expected_values_df = dataset["service/milvus_rss_data.json"]
+    expected_values_df = expected_values_df.rename(columns={"page_content": "content"})
+    expected_values_df["source"] = "rss"
 
     with open(os.path.join(TEST_DIRS.tests_data_dir, 'service/cisa_web_responses.json'), encoding='utf-8') as fh:
         web_responses = json.load(fh)
 
+    _, _, vdb_upload_run_mod, vdb_upload_pipeline_mod = import_mod
+
+    vdb_pipeline_config = vdb_upload_run_mod.build_final_config(vdb_conf_path=vdb_conf_path, 
+                                                                cli_source_conf={}, 
+                                                                cli_embeddings_conf={}, 
+                                                                cli_pipeline_conf={}, 
+                                                                cli_tokenizer_conf={},
+                                                                cli_vdb_conf={})
+
+    config: Config = vdb_pipeline_config["pipeline_config"]
+
+    vdb_pipeline_config["vdb_config"]["uri"] = milvus_server_uri
+    collection_name = vdb_pipeline_config["vdb_config"]["resource_name"]
+
     # Mock Triton results
     mock_metadata = {
         "inputs": [{
-            "name": "input_ids", "datatype": "INT32", "shape": [-1, MODEL_FEA_LENGTH]
+            "name": "input_ids", "datatype": "INT32", "shape": [-1, config.feature_length]
         }, {
-            "name": "attention_mask", "datatype": "INT32", "shape": [-1, MODEL_FEA_LENGTH]
+            "name": "attention_mask", "datatype": "INT32", "shape": [-1, config.feature_length]
         }],
         "outputs": [{
-            "name": "output", "datatype": "FP32", "shape": [-1, EMBEDDING_SIZE]
+            "name": "output", "datatype": "FP32", "shape": [-1, len(config.class_labels)]
         }]
     }
     mock_model_config = {"config": {"max_batch_size": 256}}
@@ -84,7 +97,7 @@ def test_vdb_upload_pipe(mock_triton_client: mock.MagicMock,
 
     mock_result_values = expected_values_df['embedding'].to_list()
     inf_results = np.split(mock_result_values,
-                           range(MODEL_MAX_BATCH_SIZE, len(mock_result_values), MODEL_MAX_BATCH_SIZE))
+                           range(config.model_max_batch_size, len(mock_result_values), config.model_max_batch_size))
 
     # The triton client is going to perform a logits function, calculate the inverse of it here
     inf_results = [np.log((1.0 / x) - 1.0) * -1 for x in inf_results]
@@ -103,31 +116,19 @@ def test_vdb_upload_pipe(mock_triton_client: mock.MagicMock,
 
     mock_requests_session.return_value = mock_requests_session
     mock_requests_session.get.side_effect = mock_get_fn
-
-    _, _, vdb_upload_run_mod, vdb_upload_pipeline_mod = import_mod
-
-    vdb_pipeline_config = vdb_upload_run_mod.build_final_config(vdb_conf_path=vdb_conf_path, 
-                                          cli_source_conf={}, 
-                                          cli_embeddings_conf={}, 
-                                          cli_pipeline_conf={}, 
-                                          cli_tokenizer_conf={},
-                                          cli_vdb_conf={})
-    
-    vdb_pipeline_config["vdb_config"]["uri"] = "http://localhost:19530"
-    collection_name = vdb_pipeline_config["vdb_config"]["resource_name"]
     
     vdb_upload_pipeline_mod.pipeline(**vdb_pipeline_config)
 
-    milvus_service = MilvusVectorDBService(uri="http://localhost:19530")
+    milvus_service = MilvusVectorDBService(uri=milvus_server_uri)
     resource_service = milvus_service.load_resource(name=collection_name)
 
     assert resource_service.count() == len(expected_values_df)
 
     db_results = resource_service.query("", offset=0, limit=resource_service.count())
     db_df = pd.DataFrame(sorted(db_results, key=lambda k: k['id']))
-
+    
     # The comparison function performs rounding on the values, but is unable to do so for array columns
-    dataset.assert_compare_df(db_df, expected_values_df[db_df.columns], exclude_columns=['id', 'embedding'])
+    dataset.assert_compare_df(db_df, expected_values_df[db_df.columns], exclude_columns=['id', 'source', 'embedding'])
     db_emb = db_df['embedding']
     expected_emb = expected_values_df['embedding']
 

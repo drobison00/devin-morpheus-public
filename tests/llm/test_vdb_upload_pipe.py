@@ -26,78 +26,35 @@ import pytest
 from _utils import TEST_DIRS
 from _utils import mk_async_infer
 from _utils.dataset_manager import DatasetManager
-from morpheus.config import Config
-from morpheus.config import PipelineModes
-from morpheus.pipeline.linear_pipeline import LinearPipeline
 from morpheus.service.vdb.milvus_vector_db_service import MilvusVectorDBService
-from morpheus.stages.inference.triton_inference_stage import TritonInferenceStage
-from morpheus.stages.input.rss_source_stage import RSSSourceStage
-from morpheus.stages.output.write_to_vector_db_stage import WriteToVectorDBStage
-from morpheus.stages.preprocess.deserialize_stage import DeserializeStage
-from morpheus.stages.preprocess.preprocess_nlp_stage import PreprocessNLPStage
 
 EMBEDDING_SIZE = 384
 MODEL_MAX_BATCH_SIZE = 64
 MODEL_FEA_LENGTH = 512
 
+@pytest.fixture(scope="session", name="vdb_conf_path")
+def vdb_conf_path_fixture():
+    vdb_conf_path = os.path.join(TEST_DIRS.tests_data_dir, "examples/llm/vdb_upload/vdb_config.yaml")
+    return vdb_conf_path
 
-def _run_pipeline(config: Config,
-                  milvus_server_uri: str,
-                  collection_name: str,
-                  rss_files: list[str],
-                  utils_mod: types.ModuleType,
-                  web_scraper_stage_mod: types.ModuleType):
-
-    config.mode = PipelineModes.NLP
-    config.pipeline_batch_size = 1024
-    config.model_max_batch_size = MODEL_MAX_BATCH_SIZE
-    config.feature_length = MODEL_FEA_LENGTH
-    config.edge_buffer_size = 128
-    config.class_labels = [str(i) for i in range(EMBEDDING_SIZE)]
-
-    pipe = LinearPipeline(config)
-
-    pipe.set_source(
-        RSSSourceStage(config, feed_input=rss_files, batch_size=128, run_indefinitely=False, enable_cache=False))
-    pipe.add_stage(web_scraper_stage_mod.WebScraperStage(config, chunk_size=MODEL_FEA_LENGTH, enable_cache=False))
-    pipe.add_stage(DeserializeStage(config))
-
-    pipe.add_stage(
-        PreprocessNLPStage(config,
-                           vocab_hash_file=os.path.join(TEST_DIRS.data_dir, 'bert-base-uncased-hash.txt'),
-                           do_lower_case=True,
-                           truncation=True,
-                           add_special_tokens=False,
-                           column='page_content'))
-
-    pipe.add_stage(
-        TritonInferenceStage(config, model_name='test-model', server_url='test:0000', force_convert_inputs=True))
-
-    pipe.add_stage(
-        WriteToVectorDBStage(config,
-                             resource_name=collection_name,
-                             resource_kwargs=utils_mod.build_milvus_config(embedding_size=EMBEDDING_SIZE),
-                             recreate=True,
-                             service="milvus",
-                             uri=milvus_server_uri))
-    pipe.run()
-
-
+    
 @pytest.mark.milvus
 @pytest.mark.use_python
 @pytest.mark.use_pandas
 @pytest.mark.import_mod([
-    os.path.join(TEST_DIRS.examples_dir, 'llm/common/utils.py'),
-    os.path.join(TEST_DIRS.examples_dir, 'llm/common/web_scraper_stage.py')
-])
+    os.path.join(TEST_DIRS.examples_dir, 'llm/common'),
+    os.path.join(TEST_DIRS.examples_dir, 'llm/vdb_upload/helper.py'),
+    os.path.join(TEST_DIRS.examples_dir, 'llm/vdb_upload/run.py'),
+    os.path.join(TEST_DIRS.examples_dir, 'llm/vdb_upload/pipeline.py')]
+)
 @mock.patch('requests.Session')
 @mock.patch('tritonclient.grpc.InferenceServerClient')
 def test_vdb_upload_pipe(mock_triton_client: mock.MagicMock,
                          mock_requests_session: mock.MagicMock,
-                         config: Config,
                          dataset: DatasetManager,
-                         milvus_server_uri: str,
-                         import_mod: list[types.ModuleType]):
+                        #  milvus_server_uri: str,
+                         import_mod: list[types.ModuleType],
+                         vdb_conf_path: dict):
     # We're going to use this DF to both provide values to the mocked Tritonclient,
     # but also to verify the values in the Milvus collection.
     expected_values_df = dataset["service/milvus_rss_data.json"]
@@ -147,18 +104,21 @@ def test_vdb_upload_pipe(mock_triton_client: mock.MagicMock,
     mock_requests_session.return_value = mock_requests_session
     mock_requests_session.get.side_effect = mock_get_fn
 
-    (utils_mod, web_scraper_stage_mod) = import_mod
-    collection_name = "test_vdb_upload_pipe"
-    rss_source_file = os.path.join(TEST_DIRS.tests_data_dir, 'service/cisa_rss_feed.xml')
+    _, _, vdb_upload_run_mod, vdb_upload_pipeline_mod = import_mod
 
-    _run_pipeline(config=config,
-                  milvus_server_uri=milvus_server_uri,
-                  collection_name=collection_name,
-                  rss_files=[rss_source_file],
-                  utils_mod=utils_mod,
-                  web_scraper_stage_mod=web_scraper_stage_mod)
+    vdb_pipeline_config = vdb_upload_run_mod.build_final_config(vdb_conf_path=vdb_conf_path, 
+                                          cli_source_conf={}, 
+                                          cli_embeddings_conf={}, 
+                                          cli_pipeline_conf={}, 
+                                          cli_tokenizer_conf={},
+                                          cli_vdb_conf={})
+    
+    vdb_pipeline_config["vdb_config"]["uri"] = "http://localhost:19530"
+    collection_name = vdb_pipeline_config["vdb_config"]["resource_name"]
+    
+    vdb_upload_pipeline_mod.pipeline(**vdb_pipeline_config)
 
-    milvus_service = MilvusVectorDBService(uri=milvus_server_uri)
+    milvus_service = MilvusVectorDBService(uri="http://localhost:19530")
     resource_service = milvus_service.load_resource(name=collection_name)
 
     assert resource_service.count() == len(expected_values_df)

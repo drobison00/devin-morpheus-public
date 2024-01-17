@@ -21,8 +21,8 @@ from morpheus.config import Config
 from morpheus.messages.multi_message import MultiMessage
 from morpheus.pipeline.pipeline import Pipeline
 from morpheus.stages.general.linear_modules_source import LinearModuleSourceStage
-from .module.file_source_pipe import FileSourcePipe
-from .module.rss_source_pipe import RSSSourcePipe
+from module.file_source_pipe import FileSourcePipe
+from module.rss_source_pipe import RSSSourcePipe
 
 logger = logging.getLogger(__name__)
 

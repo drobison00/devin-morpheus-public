@@ -19,9 +19,9 @@ import click
 import yaml
 
 from morpheus.config import Config, PipelineModes
-from .common import build_defualt_milvus_config
-from ..common.utils import build_rss_urls
-from ..common.utils import build_milvus_config
+from helper import build_defualt_milvus_config
+from common.utils import build_rss_urls
+from common.utils import build_milvus_config
 
 logger = logging.getLogger(__name__)
 
@@ -315,7 +315,7 @@ def build_final_config(vdb_conf_path, cli_source_conf, cli_embeddings_conf, cli_
         source_conf = vdb_pipeline_config.get('sources', []) + list(cli_source_conf.values())
         tokenizer_conf = merge_configs(vdb_pipeline_config.get('tokenizer', {}), cli_tokenizer_conf)
         vdb_conf = vdb_pipeline_config.get('vdb', {})
-        resource_schema = vdb_conf.pop("resource_shema", None)
+        resource_schema = vdb_conf.pop("resource_schema", None)
         
         if resource_schema:
             vdb_conf["resource_kwargs"] = build_milvus_config(resource_schema)

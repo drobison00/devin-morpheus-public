@@ -29,12 +29,7 @@ from _utils import mk_async_infer
 from _utils.dataset_manager import DatasetManager
 from morpheus.service.vdb.milvus_vector_db_service import MilvusVectorDBService
 
-@pytest.fixture(scope="session", name="vdb_conf_path")
-def vdb_conf_path_fixture():
-    vdb_conf_path = os.path.join(TEST_DIRS.tests_data_dir, "examples/llm/vdb_upload/vdb_config.yaml")
-    return vdb_conf_path
-
-    
+  
 @pytest.mark.milvus
 @pytest.mark.use_python
 @pytest.mark.use_pandas
@@ -46,23 +41,26 @@ def vdb_conf_path_fixture():
 )
 @mock.patch('requests.Session')
 @mock.patch('tritonclient.grpc.InferenceServerClient')
-def test_vdb_upload_pipe(mock_triton_client: mock.MagicMock,
+def test_vdb_upload_rss_source_pipe(mock_triton_client: mock.MagicMock,
                          mock_requests_session: mock.MagicMock,
                          dataset: DatasetManager,
                          milvus_server_uri: str,
-                         import_mod: list[types.ModuleType],
-                         vdb_conf_path: dict):
+                         import_mod: list[types.ModuleType]):
     # We're going to use this DF to both provide values to the mocked Tritonclient,
     # but also to verify the values in the Milvus collection.
     expected_values_df = dataset["service/milvus_rss_data.json"]
+    # As page_content is used by other pipelines, we're just renaming it to content. 
     expected_values_df = expected_values_df.rename(columns={"page_content": "content"})
     expected_values_df["source"] = "rss"
+
+    vdb_conf_path = os.path.join(TEST_DIRS.tests_data_dir, "examples/llm/vdb_upload/vdb_rss_source_config.yaml")
 
     with open(os.path.join(TEST_DIRS.tests_data_dir, 'service/cisa_web_responses.json'), encoding='utf-8') as fh:
         web_responses = json.load(fh)
 
     _, _, vdb_upload_run_mod, vdb_upload_pipeline_mod = import_mod
 
+    # Building final configuration. Here we're passing empty dictionaries for cli configuration.
     vdb_pipeline_config = vdb_upload_run_mod.build_final_config(vdb_conf_path=vdb_conf_path, 
                                                                 cli_source_conf={}, 
                                                                 cli_embeddings_conf={}, 
@@ -136,3 +134,88 @@ def test_vdb_upload_pipe(mock_triton_client: mock.MagicMock,
         db_emb_row = pd.DataFrame(db_emb[i], dtype=np.float32)
         expected_emb_row = pd.DataFrame(expected_emb[i], dtype=np.float32)
         dataset.assert_compare_df(db_emb_row, expected_emb_row)
+
+
+@pytest.mark.milvus
+@pytest.mark.use_python
+@pytest.mark.use_pandas
+@pytest.mark.import_mod([
+    os.path.join(TEST_DIRS.examples_dir, 'llm/common'),
+    os.path.join(TEST_DIRS.examples_dir, 'llm/vdb_upload/helper.py'),
+    os.path.join(TEST_DIRS.examples_dir, 'llm/vdb_upload/run.py'),
+    os.path.join(TEST_DIRS.examples_dir, 'llm/vdb_upload/pipeline.py')]
+)
+@mock.patch('tritonclient.grpc.InferenceServerClient')
+def test_vdb_upload_file_source_pipe(mock_triton_client: mock.MagicMock,
+                         dataset: DatasetManager,
+                         milvus_server_uri: str,
+                         import_mod: list[types.ModuleType]):
+
+    expected_values_df = dataset["examples/llm/vdb_upload/test_data_output.json"]
+    print(expected_values_df)
+    vdb_conf_path = os.path.join(TEST_DIRS.tests_data_dir, "examples/llm/vdb_upload/vdb_file_source_config.yaml")
+
+    _, _, vdb_upload_run_mod, vdb_upload_pipeline_mod = import_mod
+
+    # # Building final configuration. Here we're passing empty dictionaries for cli configuration.
+    vdb_pipeline_config = vdb_upload_run_mod.build_final_config(vdb_conf_path=vdb_conf_path, 
+                                                                cli_source_conf={}, 
+                                                                cli_embeddings_conf={}, 
+                                                                cli_pipeline_conf={}, 
+                                                                cli_tokenizer_conf={},
+                                                                cli_vdb_conf={})
+
+    config: Config = vdb_pipeline_config["pipeline_config"]
+
+    vdb_pipeline_config["vdb_config"]["uri"] = milvus_server_uri
+    collection_name = vdb_pipeline_config["vdb_config"]["resource_name"]
+
+    # Mock Triton results
+    mock_metadata = {
+        "inputs": [{
+            "name": "input_ids", "datatype": "INT32", "shape": [-1, config.feature_length]
+        }, {
+            "name": "attention_mask", "datatype": "INT32", "shape": [-1, config.feature_length]
+        }],
+        "outputs": [{
+            "name": "output", "datatype": "FP32", "shape": [-1, len(config.class_labels)]
+        }]
+    }
+    mock_model_config = {"config": {"max_batch_size": 256}}
+
+    mock_triton_client.return_value = mock_triton_client
+    mock_triton_client.is_server_live.return_value = True
+    mock_triton_client.is_server_ready.return_value = True
+    mock_triton_client.is_model_ready.return_value = True
+    mock_triton_client.get_model_metadata.return_value = mock_metadata
+    mock_triton_client.get_model_config.return_value = mock_model_config
+
+    mock_result_values = expected_values_df['embedding'].to_list()
+    inf_results = np.split(mock_result_values,
+                           range(config.model_max_batch_size, len(mock_result_values), config.model_max_batch_size))
+
+    # The triton client is going to perform a logits function, calculate the inverse of it here
+    inf_results = [np.log((1.0 / x) - 1.0) * -1 for x in inf_results]
+
+    async_infer = mk_async_infer(inf_results)
+    mock_triton_client.async_infer.side_effect = async_infer
+    
+    vdb_upload_pipeline_mod.pipeline(**vdb_pipeline_config)
+
+    milvus_service = MilvusVectorDBService(uri=milvus_server_uri)
+    resource_service = milvus_service.load_resource(name=collection_name)
+
+    assert resource_service.count() == len(expected_values_df)
+
+    db_results = resource_service.query("", offset=0, limit=resource_service.count())
+    db_df = pd.DataFrame(sorted(db_results, key=lambda k: k['id']))
+    
+    # The comparison function performs rounding on the values, but is unable to do so for array columns
+    dataset.assert_compare_df(db_df, expected_values_df[db_df.columns], exclude_columns=['id', 'embedding'])
+    db_emb = db_df['embedding']
+    expected_emb = expected_values_df['embedding']
+
+    for i in range(resource_service.count()):
+        db_emb_row = pd.DataFrame(db_emb[i], dtype=np.float32)
+        expected_emb_row = pd.DataFrame(expected_emb[i], dtype=np.float32)
+        dataset.assert_compare_df(db_emb_row, expected_emb_row)@pytest.mark.milvus

@@ -28,7 +28,7 @@ from morpheus.modules.input.multi_file_source import MultiFileSourceInterface
 from morpheus.modules.preprocess.deserialize import DeserializeInterface
 from morpheus.utils.module_utils import ModuleInterface
 from morpheus.utils.module_utils import register_module
-from module.schema_transform import SchemaTransformInterface
+from vdb_upload.module.schema_transform import SchemaTransformInterface
 from common.content_extractor_module import FileContentExtractorInterface
 
 logger = logging.getLogger(__name__)

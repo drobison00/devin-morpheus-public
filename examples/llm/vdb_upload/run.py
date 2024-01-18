@@ -19,7 +19,7 @@ import click
 import yaml
 
 from morpheus.config import Config, PipelineModes
-from helper import build_defualt_milvus_config
+from vdb_upload.helper import build_defualt_milvus_config
 from common.utils import build_rss_urls
 from common.utils import build_milvus_config
 

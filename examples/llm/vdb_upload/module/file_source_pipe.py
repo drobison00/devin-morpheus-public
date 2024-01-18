@@ -133,10 +133,13 @@ def _file_source_pipe(builder: mrc.Builder):
     deserialize_definition = DeserializeInterface.get_definition("deserialize",
                                                                  {"batch_size": validated_config.batch_size})
 
-    monitor_1 = Monitor.get_definition("monitor_1", {"description": "FileSourcePipe Transform",
-                                                     "silence_monitors": not enable_monitor})
-    monitor_2 = Monitor.get_definition("monitor_2", {"description": "File Source Deserialize",
-                                                     "silence_monitors": not enable_monitor})
+    monitor_1 = Monitor.get_definition(
+        "monitor_1", {
+            "description": "FileSourcePipe Transform", "silence_monitors": not enable_monitor
+        })
+    monitor_2 = Monitor.get_definition("monitor_2", {
+        "description": "File Source Deserialize", "silence_monitors": not enable_monitor
+    })
 
     # Load modules
     multi_file_module = multi_file_definition.load(builder=builder)
@@ -157,5 +160,4 @@ def _file_source_pipe(builder: mrc.Builder):
     builder.register_module_output("output", monitor_2_module.output_port("output"))
 
 
-FileSourcePipe = ModuleInterface("file_source_pipe", "morpheus_examples_llm",
-                                 FileSourceParamContract)
+FileSourcePipe = ModuleInterface("file_source_pipe", "morpheus_examples_llm", FileSourceParamContract)

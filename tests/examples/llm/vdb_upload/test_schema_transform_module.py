@@ -12,15 +12,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import os
 import types
 
-import pytest
-
 import cudf
-
-from _utils import TEST_DIRS
+import pytest
 from _utils import assert_results
+
 from morpheus.config import Config
 from morpheus.messages import MessageMeta
 from morpheus.pipeline import LinearPipeline
@@ -29,40 +26,50 @@ from morpheus.stages.input.in_memory_source_stage import InMemorySourceStage
 from morpheus.stages.output.compare_dataframe_stage import CompareDataFrameStage
 
 
-@pytest.mark.slow
 @pytest.mark.use_python
 @pytest.mark.use_cudf
-@pytest.mark.import_mod(os.path.join(TEST_DIRS.examples_dir, 'llm/common/web_scraper_module.py'))
-def test_web_scraper_module(config: Config, mock_rest_server: str, import_mod: types.ModuleType):
-    url = f"{mock_rest_server}/www/index"
+@pytest.mark.parametrize("num_select, num_renames", [(1, 0), (0, 1), (1, 1), (6, 6), (13, 10), (10, 13)])
+def test_schema_transform_module(num_select, num_renames, config: Config,
+                                 import_schema_transform_module: types.ModuleType):
+    # Generate the DataFrame columns for select and rename
+    select_columns = [f'select_{i}' for i in range(num_select)]
+    rename_columns = [f'rename_from_{i}' for i in range(num_renames)]
 
-    df = cudf.DataFrame({"link": [url]})
-    df_expected = cudf.DataFrame({"link": [url], "page_content": "website title some paragraph"})
+    # Generate the DataFrame
+    df_data = {col: range(10) for col in select_columns}
+    df_data.update({col: range(10) for col in rename_columns})
+    df = cudf.DataFrame(df_data)
 
-    web_scraper_definition = import_mod.WebScraperInterface.get_definition(
-        "web_scraper",
-        module_config={
-            "web_scraper_config": {
-                "link_column": "link",
-                "chunk_size": 100,
-                "enable_cache": False,
-                "cache_path": "./.cache/http/RSSDownloadStage.sqlite",
-                "cache_dir": "./.cache/llm/rss"
-            }
-        })
+    # Generate the expected DataFrame
+    expected_data = {col: range(10) for col in select_columns}
+    expected_data.update({f'rename_to_{i}': range(10) for i in range(num_renames)})
+    df_expected = cudf.DataFrame(expected_data)
 
+    # Generate the schema transform configuration
+    transform_config = {
+        "schema_transform_config": {col: {"dtype": "int", "op_type": "select"} for col in select_columns}
+    }
+    transform_config["schema_transform_config"].update(
+        {f'rename_to_{i}': {"from": f'rename_from_{i}', "dtype": "int", "op_type": "rename"} for i in
+         range(num_renames)}
+    )
+
+    schema_module_def = import_schema_transform_module.SchemaTransformInterface.get_definition(
+        "schema_transform",
+        module_config=transform_config)
+
+    # Set up the pipeline
     pipe = LinearPipeline(config)
     pipe.set_source(InMemorySourceStage(config, [df]))
     pipe.add_stage(
         LinearModulesStage(config,
-                           web_scraper_definition,
+                           schema_module_def,
                            input_type=MessageMeta,
                            output_type=MessageMeta,
                            input_port_name="input",
                            output_port_name="output"))
+
     comp_stage = pipe.add_stage(CompareDataFrameStage(config, compare_df=df_expected))
     pipe.run()
-
-    print(comp_stage.get_messages())
 
     assert_results(comp_stage.get_results())

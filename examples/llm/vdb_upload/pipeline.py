@@ -29,8 +29,11 @@ logger = logging.getLogger(__name__)
 
 
 # TODO(Devin): Look into making this a morpheus.llm function call (the whole pipeline)
-def pipeline(pipeline_config: Config, source_config: typing.List, vdb_config: typing.Dict,
-             embeddings_config: typing.Dict, tokenizer_config: typing.Dict) -> float:
+def pipeline(pipeline_config: Config,
+             source_config: typing.List,
+             vdb_config: typing.Dict,
+             embeddings_config: typing.Dict,
+             tokenizer_config: typing.Dict) -> float:
     """
     Sets up and runs a data processing pipeline based on provided configurations.
 

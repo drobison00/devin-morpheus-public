@@ -29,9 +29,8 @@ from morpheus.modules.input.rss_source import RSSSourceInterface
 from morpheus.modules.preprocess.deserialize import DeserializeInterface
 from morpheus.utils.module_utils import ModuleInterface
 from morpheus.utils.module_utils import register_module
-
-from ...common.web_scraper_module import WebScraperInterface
-from .schema_transform import SchemaTransformInterface
+from vdb_upload.module.schema_transform import SchemaTransformInterface
+from common.web_scraper_module import WebScraperInterface
 
 logger = logging.getLogger(__name__)
 

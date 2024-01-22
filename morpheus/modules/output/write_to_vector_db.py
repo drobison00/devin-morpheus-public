@@ -144,10 +144,13 @@ def _write_to_vector_db(builder: mrc.Builder):
 
         # Pushing remaining messages
         for key, accum_stats in accumulator_dict.items():
-            if accum_stats.data:
-                merged_df = cudf.concat(accum_stats.data)
-                service.insert_dataframe(name=key, df=merged_df)
-                final_df_references.append(accum_stats.data)
+            try:
+                if accum_stats.data:
+                    merged_df = cudf.concat(accum_stats.data)
+                    service.insert_dataframe(name=key, df=merged_df)
+                    final_df_references.append(accum_stats.data)
+            except Exception as e:
+                logger.error(f"Unable to upload dataframe entries to vector database: {e}")
         # Close vector database service connection
         service.close()
 

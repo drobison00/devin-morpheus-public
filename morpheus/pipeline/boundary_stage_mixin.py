@@ -1,4 +1,4 @@
-# Copyright (c) 2023, NVIDIA CORPORATION.
+# Copyright (c) 2024, NVIDIA CORPORATION.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -12,15 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from abc import ABC
 
-def _verify_deps(deps: tuple[str], error_message: str, namespace: dict):
-    """
-    There are some dependencies that are only used by a specific stage, and are not installed by default.
-    These packages are imported in a guarded try-except block. It is only when the stage is used that these
-    dependencies need to be enforced.
 
-    raise ImportError if any of the dependencies are not installed.
+class BoundaryStageMixin(ABC):
     """
-    for dep in deps:
-        if dep not in namespace:
-            raise ImportError(error_message)
+    Mixin intended to be added to both ingress and egress boundary stages, currently this only adds the ability to
+    identify boundary stages.
+    """
